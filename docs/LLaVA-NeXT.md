@@ -4,10 +4,13 @@
 First please install our repo with code and environments: `pip install git+https://github.com/LLaVA-VL/LLaVA-NeXT.git`
 
 Here is a quick inference code using [`llavanext-llama3-8B`](https://huggingface.co/lmms-lab/llama3-llava-next-8b) as an example. You will need to install [`flash-attn`](https://github.com/Dao-AILab/flash-attention) to use this code snippet. If you don't want to install it, you can set `attn_implementation=None` when load_pretrained_model
+
 ```python
 from llava.model.builder import load_pretrained_model
 from llava.mm_utils import get_model_name_from_path, process_images, tokenizer_image_token
-from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN, IGNORE_INDEX
+from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN,
+
+IGNORE_INDEX
 from llava.conversation import conv_templates, SeparatorStyle
 
 from PIL import Image
@@ -19,7 +22,8 @@ pretrained = "lmms-lab/llama3-llava-next-8b"
 model_name = "llava_llama3"
 device = "cuda"
 device_map = "auto"
-tokenizer, model, image_processor, max_length = load_pretrained_model(pretrained, None, model_name, device_map=device_map) # Add any other thing you want to pass in llava_model_args
+tokenizer, model, image_processor, max_length = load_pretrained_model(pretrained, None, model_name,
+                                                                      device_map=device_map)  # Add any other thing you want to pass in llava_model_args
 
 model.eval()
 model.tie_weights()
@@ -29,16 +33,16 @@ image = Image.open(requests.get(url, stream=True).raw)
 image_tensor = process_images([image], image_processor, model.config)
 image_tensor = [_image.to(dtype=torch.float16, device=device) for _image in image_tensor]
 
-conv_template = "llava_llama_3" # Make sure you use correct chat template for different models
+conv_template = "llava_llama_3"  # Make sure you use correct chat template for different models
 question = DEFAULT_IMAGE_TOKEN + "\nWhat is shown in this image?"
 conv = copy.deepcopy(conv_templates[conv_template])
 conv.append_message(conv.roles[0], question)
 conv.append_message(conv.roles[1], None)
 prompt_question = conv.get_prompt()
 
-input_ids = tokenizer_image_token(prompt_question, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).to(device)
+input_ids = tokenizer_image_token(prompt_question, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).to(
+    device)
 image_sizes = [image.size]
-
 
 cont = model.generate(
     input_ids,
