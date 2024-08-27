@@ -15,6 +15,7 @@
 
 
 from abc import ABC, abstractmethod
+from typing import Union, List
 
 import torch
 import torch.nn as nn
@@ -24,6 +25,7 @@ from llava.constants import (IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATC
 from llava.mm_utils import get_anyres_image_grid_shape
 from llava.model.multimodal_encoder.builder import build_vision_tower
 from llava.model.multimodal_projector.builder import build_vision_projector
+from llava.model_voco.language_model.llava_voco_llama import VoCoConfig
 
 
 class LlavaMetaModel:
@@ -129,8 +131,7 @@ def unpad_image(tensor, original_size):
     return unpadded_tensor
 
 
-class LlavaMetaForCausalLM(ABC):
-
+class VoCoMetaForCausalLM(ABC):
     @abstractmethod
     def get_model(self):
         pass
@@ -387,3 +388,109 @@ class LlavaMetaForCausalLM(ABC):
                     p.requires_grad = False
                 for p in self.get_output_embeddings().parameters():
                     p.requires_grad = False
+
+
+class VoCoMetaForVideo(VoCoMetaForCausalLM):
+    config: VoCoConfig
+
+    @abstractmethod
+    def get_model(self):
+        ...
+
+    def encode_video(self, input_ids, frames: torch.Tensor):
+        # input_ids.shape: (seq_len,), contains <image>, <voco> tokens and prompts
+        # frames.shape: (num_frames, C, H, W)
+        with torch.inference_mode():
+            # encode video frames as batch
+            features = self.get_model().get_vision_tower()(frames)  # Shape : (num_frames, 576, 1024)
+            features = self.get_model().mm_projector(features)  # Shape : (num_frames, 576, 4096)
+
+            # Truncate tokens after <voco>
+            trunc = input_ids[:torch.argwhere(input_ids == self.config.voco_token_id)[-1] + 1]
+            # slice the input_ids into segments
+            ipos = [-1] + torch.where(trunc == IMAGE_TOKEN_INDEX)[0].tolist() + [None]
+            split = [trunc[ipos[i] + 1:ipos[i + 1]] for i in range(len(ipos) - 1)]
+            emb_split = [self.get_model().embed_tokens(segment) for segment in split]
+            emb_split = [emb.unsqueeze(0).expand(features.shape[0], -1, -1) for emb in emb_split]
+            from itertools import zip_longest
+            emb_interleaved = [tensor for pair in zip_longest(emb_split, [features]) for tensor in pair if
+                               tensor is not None]
+            emb_interleaved = torch.hstack(emb_interleaved)  # Shape : (num_frames, 576+num_voco+extra, 4096)
+
+            # Forward through the model
+            attention_mask = torch.ones(emb_interleaved.shape[:2], dtype=torch.bool, device=emb_interleaved.device)
+            out = self.get_model().forward(inputs_embeds=features,  # Shape : (num_frames, 577, 4096)
+                                           attention_mask=attention_mask)
+        voco_features = out.last_hidden_state[:, -1, :]  # Shape : (num_frames, num_voco, 4096)
+        return
+
+    def prepare_inputs_labels_for_image(
+            self, input_ids, position_ids, attention_mask, past_key_values, labels,
+            images, image_sizes=None, voco_loc_back=None
+    ):
+        ...
+
+    def prepare_inputs_labels_for_image_with_prompt(
+            self, input_ids, position_ids, attention_mask, past_key_values, labels,
+            images, image_sizes=None, voco_loc_back=None
+    ):
+        ...
+
+    def prepare_inputs_labels_for_video(
+            self,
+            input_ids,
+            position_ids,
+            attention_mask,
+            past_key_values,
+            labels,
+            frames,
+    ):
+        vision_tower = self.get_vision_tower()
+        if vision_tower is None or frames is None or input_ids.shape[1] == 1:
+            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+
+        video_features = self.encode_video(frames)  # Shape: (batch_size, num_frames, hidden_size)
+
+        new_input_embeds = []
+        new_labels = []
+        for batch_idx, cur_input_ids in enumerate(input_ids):
+            cur_video_features = video_features[batch_idx]
+            num_voco_tokens = cur_video_features.shape[0]
+
+            # Embed text tokens
+            cur_input_embeds = self.get_model().embed_tokens(cur_input_ids)
+
+            # Concatenate video features (voco tokens) with text embeddings
+            cur_input_embeds = torch.cat([cur_video_features, cur_input_embeds], dim=0)
+
+            new_input_embeds.append(cur_input_embeds)
+
+            # Adjust labels
+            cur_labels = labels[batch_idx]
+            new_labels.append(torch.cat([
+                torch.full((num_voco_tokens,), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype),
+                cur_labels
+            ]))
+
+        # Combine and pad the sequences
+        max_len = max(x.shape[0] for x in new_input_embeds)
+        batch_size = len(new_input_embeds)
+        hidden_size = new_input_embeds[0].shape[-1]
+
+        new_input_embeds_padded = torch.zeros((batch_size, max_len, hidden_size), dtype=new_input_embeds[0].dtype,
+                                              device=new_input_embeds[0].device)
+        new_labels_padded = torch.full((batch_size, max_len), IGNORE_INDEX, dtype=labels.dtype, device=labels.device)
+        attention_mask_padded = torch.zeros((batch_size, max_len), dtype=attention_mask.dtype,
+                                            device=attention_mask.device)
+
+        for i, (cur_embed, cur_labels) in enumerate(zip(new_input_embeds, new_labels)):
+            cur_len = cur_embed.shape[0]
+            new_input_embeds_padded[i, :cur_len] = cur_embed
+            new_labels_padded[i, :cur_len] = cur_labels
+            attention_mask_padded[i, :cur_len] = 1
+
+        # Adjust position_ids to account for added voco tokens
+        if position_ids is not None:
+            position_ids = position_ids + num_voco_tokens
+
+        return None, position_ids, attention_mask_padded, past_key_values, new_input_embeds_padded, new_labels_padded

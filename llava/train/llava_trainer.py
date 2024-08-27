@@ -182,14 +182,14 @@ class LLaVATrainer(Trainer):
                         {
                             "params": [
                                 p for n, p in opt_model.named_parameters() if (
-                                            n in decay_parameters and n not in projector_parameters and n not in vision_tower_parameters and p.requires_grad)
+                                        n in decay_parameters and n not in projector_parameters and n not in vision_tower_parameters and p.requires_grad)
                             ],
                             "weight_decay": self.args.weight_decay,
                         },
                         {
                             "params": [
                                 p for n, p in opt_model.named_parameters() if (
-                                            n in decay_parameters and n not in projector_parameters and n in vision_tower_parameters and p.requires_grad)
+                                        n in decay_parameters and n not in projector_parameters and n in vision_tower_parameters and p.requires_grad)
                             ],
                             "weight_decay": self.args.weight_decay,
                             "lr": self.args.mm_vision_tower_lr,
@@ -197,14 +197,14 @@ class LLaVATrainer(Trainer):
                         {
                             "params": [
                                 p for n, p in opt_model.named_parameters() if (
-                                            n not in decay_parameters and n not in projector_parameters and n not in vision_tower_parameters and p.requires_grad)
+                                        n not in decay_parameters and n not in projector_parameters and n not in vision_tower_parameters and p.requires_grad)
                             ],
                             "weight_decay": 0.0,
                         },
                         {
                             "params": [
                                 p for n, p in opt_model.named_parameters() if (
-                                            n not in decay_parameters and n not in projector_parameters and n in vision_tower_parameters and p.requires_grad)
+                                        n not in decay_parameters and n not in projector_parameters and n in vision_tower_parameters and p.requires_grad)
                             ],
                             "weight_decay": 0.0,
                             "lr": self.args.mm_vision_tower_lr,

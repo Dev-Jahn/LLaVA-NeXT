@@ -31,6 +31,8 @@ import tokenizers
 from llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, \
     DEFAULT_IM_END_TOKEN
 from torch.utils.data import Dataset
+
+from llava.conversation import Conversation
 from llava.train.llava_trainer import LLaVATrainer
 
 from llava import conversation as conversation_lib
@@ -418,9 +420,10 @@ def preprocess_llama_2(
 def preprocess_v1(
         sources,
         tokenizer: transformers.PreTrainedTokenizer,
-        has_image: bool = False
+        conv:Conversation,
+        has_image: bool = False,
 ) -> Dict:
-    conv = conversation_lib.voco_default_conversation.copy()
+    conv = conv.copy()
     roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
 
     # Apply prompt templates
@@ -635,7 +638,7 @@ def preprocess(
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA_2:
         return preprocess_llama_2(sources, tokenizer, has_image=has_image)
     if conversation_lib.default_conversation.version.startswith("v1"):
-        return preprocess_v1(sources, tokenizer, has_image=has_image)
+        return preprocess_v1(sources, tokenizer, conv=conversation_lib.default_conversation, has_image=has_image)
     if conversation_lib.default_conversation.version == "mpt":
         return preprocess_mpt(sources, tokenizer, has_image=has_image)
     # add end signal and concatenate together
@@ -837,14 +840,14 @@ def train(attn_implementation=None):
             model = LlavaMptForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 config=config,
-                cache_dir=training_args.cache_dir,
+                cache_dir=training_args.root_dir,
                 **bnb_model_from_pretrained_args
             )
         else:
             print("use LlavaLlamaForCausalLM!!!")
             model = LlavaLlamaForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
+                cache_dir=training_args.root_dir,
                 attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
@@ -852,7 +855,7 @@ def train(attn_implementation=None):
     else:
         model = transformers.LlamaForCausalLM.from_pretrained(
             model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
+            cache_dir=training_args.root_dir,
             attn_implementation=attn_implementation,
             torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
             **bnb_model_from_pretrained_args
@@ -898,14 +901,14 @@ def train(attn_implementation=None):
     if 'mpt' in model_args.model_name_or_path:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
+            cache_dir=training_args.root_dir,
             model_max_length=training_args.model_max_length,
             padding_side="right"
         )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
+            cache_dir=training_args.root_dir,
             model_max_length=training_args.model_max_length,
             padding_side="left",
             use_fast=False,

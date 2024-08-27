@@ -22,6 +22,9 @@ standalone = [
     "httpx",
     "einops",
     "ftfy",
+    "yt-dlp[default]",
+    "av",
+    "opencv-python",
 ]
 
 train = [
