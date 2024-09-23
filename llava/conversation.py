@@ -35,8 +35,8 @@ class Conversation:
     sep2: str = None
     version: str = "Unknown"
 
-    tokenizer_id: str = ""
-    tokenizer: Any = None
+    tokenizer_id: str = None
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_id) if tokenizer_id is not None else None
     # Stop criteria (the default one is EOS token)
     stop_str: Union[str, List[str]] = None
     # Stops generation if meeting any token in this list
@@ -413,7 +413,6 @@ conv_llava_llama_3 = Conversation(
     sep="<|eot_id|>",
     sep_style=SeparatorStyle.LLAMA_3,
     tokenizer_id="meta-llama/Meta-Llama-3-8B-Instruct",
-    tokenizer=AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct"),
     stop_token_ids=[128009],
 )
 

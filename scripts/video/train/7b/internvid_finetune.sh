@@ -1,18 +1,42 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+# Run the script in the project root
+export CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7
 
-accelerate launch llava.train.train_voco_video.py \
-    --model_path checkpoints checkpoints/voco_llama_ckpt_0807 \
-    --pretrain_mm_mlp_adapter checkpoints/llava-v1.5-mlp2x-336px-pretrain-vicuna-7b-v1.5/mm_projector.bin \
+accelerate launch \
+    --config_file scripts/accelerate.yaml \
+    llava/train/train_voco_video.py \
+    --model_path checkpoints/voco_llama_ckpt_0807 \
+    --num_voco 2 \
+    --conv_name custom_vicuna_video \
     --version v0 \
-    --mm_vision_select_layer -2 \
     --dataset internvid \
-    --data_dir None \
-    --fps None \
     --num_frames 32 \
     --frame_size 336 \
-    --cache_dir: None \
-    --model_max_length 2048
+    --freeze_mm_mlp_adapter \
+    --model_max_length 2048 \
+    --bf16 True \
+    --tf32 True \
+    --output_dir checkpoints/voco-7b-video \
+    --max_steps 100 \
+    --per_device_train_batch_size 16 \
+    --per_device_eval_batch_size 4 \
+    --gradient_accumulation_steps 1 \
+    --evaluation_strategy "no" \
+    --save_strategy "steps" \
+    --save_steps 10 \
+    --save_total_limit 10 \
+    --learning_rate 2e-5 \
+    --weight_decay 0. \
+    --warmup_ratio 0.03 \
+    --lr_scheduler_type "cosine" \
+    --logging_steps 1 \
+    --gradient_checkpointing True \
+    --dataloader_num_workers 4 \
+    --report_to wandb
+
+# Options:
+#    --data_dir None \
+#    --fps 1 \
 
 #    --freeze_backbone \
 #    --tune_mm_mlp_adapter \
@@ -25,3 +49,6 @@ accelerate launch llava.train.train_voco_video.py \
 #    --lora_weight_path "" \
 #    --lora_bias "none" \
 #    --mm_projector_lr None \
+#    --pretrain_mm_mlp_adapter checkpoints/llava-v1.5-mlp2x-336px-pretrain-vicuna-7b-v1.5/mm_projector.bin \
+
+#    --deepspeed scripts/zero3.json \

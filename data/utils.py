@@ -8,6 +8,19 @@ import yt_dlp
 from PIL import Image
 
 
+class DummyLogger(logging.Logger):
+    def __init__(self, name, level=logging.NOTSET):
+        super().__init__(name, level)
+
+    def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False, stacklevel=1):
+        pass
+
+
+def get_dummy_logger(name='dummy'):
+    logging.setLoggerClass(DummyLogger)
+    return logging.getLogger(name)
+
+
 def yt2pil(
         video_url, resolution, fps=None, max_frames=None, start=None, end=None,
         cookie_path=None, hwaccel=None, debug=False
@@ -22,7 +35,7 @@ def yt2pil(
         # 'format': f'bestvideo[height<={target_height*2}]', # for faster loading
         'quiet': False if debug else True,
         'no_warnings': False if debug else True,
-        'logger': None if debug else logging.getLogger('dummy'),
+        'logger': None if debug else get_dummy_logger(),
         'user_agent': (
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
             'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -65,7 +78,7 @@ def yt2pil(
         raise ValueError('One of fps or max_frames must be provided')
 
     dev_args = {
-        # 'vaapi': ('-init_hw_device', 'vaapi=va:/dev/dri/renderD128',  # NOTE: this is for Intel GPU
+        # 'vaapi': ('-init_hw_device', 'vaapi=va:/dev/dri/renderD128',  # NOTE: for Intel GPU
         #           '-hwaccel', 'vaapi',
         #           '-hwaccel_device', 'va'),
         'vaapi': ('-hwaccel', 'vaapi'),

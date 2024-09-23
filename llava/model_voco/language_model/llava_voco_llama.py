@@ -28,18 +28,11 @@ from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutpu
 from transformers.generation.utils import GenerateOutput
 from transformers.cache_utils import Cache, DynamicCache
 
-from llava.model_voco.llava_arch import LlavaMetaModel, VoCoMetaForCausalLM, VoCoMetaForVideo
+from llava.model_voco.llava_arch import LlavaMetaModel, VoCoMetaForCausalLM, VoCoMetaForVideo, VoCoConfig
 from .attn_utils.modeling_attn_mask_utils import (_prepare_4d_causal_attention_mask,
                                                   _prepare_4d_causal_attention_mask_for_sdpa)
 
 logger = getLogger(__name__)
-
-
-class VoCoConfig(LlamaConfig):
-    model_type = "llava_voco_llama"
-    voco_token_id: int
-    num_voco_tokens: int
-
 
 LLAMA_ATTENTION_CLASSES = {
     "eager": LlamaAttention,
@@ -256,7 +249,7 @@ class VoCoLlamaModel(LlamaPreTrainedModel):
         if self._use_flash_attention_2:
             # 2d mask is passed through the layers
             attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
-        elif self._use_sdpa and not output_attentions:
+        elif self._use_sdpa and not output_attentions and voco_loc_back is not None:
             # output_attentions=True can not be supported when using SDPA, and we fall back on
             # the manual implementation that requires a 4D causal mask in all cases.
             _2d_attention_mask_b = attention_mask
@@ -659,7 +652,6 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
     def forward(
             self,
             input_ids: torch.LongTensor = None,
-            frames: Optional[torch.FloatTensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
             position_ids: Optional[torch.LongTensor] = None,
             past_key_values: Optional[List[torch.FloatTensor]] = None,
@@ -668,59 +660,10 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
             use_cache: Optional[bool] = None,
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
-            image_sizes: Optional[List[List[int]]] = None,
+            videos: Optional[torch.FloatTensor] = None,
             return_dict: Optional[bool] = None,
-            voco_loc_back=None,
-    ):
-
-        if inputs_embeds is not None:
-            (
-                input_ids,
-                position_ids,
-                attention_mask,
-                past_key_values,
-                inputs_embeds,
-                labels
-            ) = self.prepare_inputs_labels_for_video(
-                input_ids,
-                position_ids,
-                attention_mask,
-                past_key_values,
-                labels,
-                frames,
-                image_sizes,
-            )
-        return super().forward(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
-            labels=labels,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-            voco_loc_back=voco_loc_back
-        )
-
-    def forward(
-            self,
-            input_ids: torch.LongTensor = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            position_ids: Optional[torch.LongTensor] = None,
-            past_key_values: Optional[List[torch.FloatTensor]] = None,
-            inputs_embeds: Optional[torch.FloatTensor] = None,
-            labels: Optional[torch.LongTensor] = None,
-            use_cache: Optional[bool] = None,
-            output_attentions: Optional[bool] = None,
-            output_hidden_states: Optional[bool] = None,
-            images: Optional[torch.FloatTensor] = None,
-            image_sizes: Optional[List[List[int]]] = None,
-            return_dict: Optional[bool] = None,
-            voco_loc_back=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-
+        voco_loc_back = None
         if inputs_embeds is None:
             (
                 input_ids,
@@ -736,9 +679,7 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
                 attention_mask,
                 past_key_values,
                 labels,
-                images,
-                image_sizes,
-                voco_loc_back
+                videos,
             )
 
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -760,7 +701,6 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
             return_dict=return_dict,
             voco_loc_back=voco_loc_back
         )
-
         hidden_states = outputs[0]
         if self.config.pretraining_tp > 1:
             lm_head_slices = self.lm_head.weight.split(self.vocab_size // self.config.pretraining_tp, dim=0)
@@ -799,7 +739,7 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
     def generate(
             self,
             inputs: Optional[torch.Tensor] = None,
-            images: Optional[torch.Tensor] = None,
+            videos: Optional[torch.Tensor] = None,
             image_sizes: Optional[torch.Tensor] = None,
             **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
@@ -808,7 +748,7 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
         if "inputs_embeds" in kwargs:
             raise NotImplementedError("`inputs_embeds` is not supported")
 
-        if images is not None:
+        if videos is not None:
             (
                 inputs,
                 position_ids,
@@ -823,7 +763,7 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
                 attention_mask,
                 None,
                 None,
-                images,
+                videos,
                 image_sizes=image_sizes
             )
         else:
@@ -833,13 +773,12 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
             position_ids=position_ids,
             attention_mask=attention_mask,
             inputs_embeds=inputs_embeds,
-            voco_loc_back=voco_loc_back,
             **kwargs
         )
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None,
                                       inputs_embeds=None, **kwargs):
-        images = kwargs.pop("images", None)
+        videos = kwargs.pop("videos", None)
         image_sizes = kwargs.pop("image_sizes", None)
         voco_loc_back = kwargs.pop("voco_loc_back", None)
 
@@ -849,8 +788,8 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
 
         if voco_loc_back is not None:
             inputs['voco_loc_back'] = voco_loc_back
-        if images is not None:
-            inputs['images'] = images
+        if videos is not None:
+            inputs['videos'] = videos
         if image_sizes is not None:
             inputs['image_sizes'] = image_sizes
         return inputs
@@ -923,3 +862,4 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
 
 AutoConfig.register("llava_voco_llama", VoCoConfig)
 AutoModelForCausalLM.register(VoCoConfig, VoCoLlamaForCausalLM)
+AutoModelForCausalLM.register(VoCoConfig, VoCoLlamaForVideo)

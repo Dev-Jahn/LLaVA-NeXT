@@ -1,13 +1,2 @@
-AVAILABLE_MODELS = {
-    "llava_voco_llama": "VoCoLlamaForCausalLM, VoCoConfig",
-}
-
-for model_name, model_classes in AVAILABLE_MODELS.items():
-    try:
-        exec(f"from .language_model.{model_name} import {model_classes}")
-    except ImportError:
-        import traceback
-
-        traceback.print_exc()
-        print(f"Failed to import {model_name} from llava.model_voco.language_model.{model_name}")
-        pass
+from .language_model.llava_voco_llama import VoCoLlamaForCausalLM
+from .language_model.llava_voco_llama import VoCoLlamaForVideo
