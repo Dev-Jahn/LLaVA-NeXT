@@ -60,7 +60,7 @@ class LocalVideoDataset(Dataset):
 
     def __getitem__(self, idx: int):
         video_path = self.video_paths[idx]
-        frames_array = self.load_video(video_path)
+        frames_array = self._load_video(video_path)
         frames = frames_array if self.transform is None else self.transform(frames_array)
 
         return {
