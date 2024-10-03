@@ -573,8 +573,19 @@ Answer the questions.""",
     sep="<|im_end|>",
 )
 
-custom_vicuna_video_v1 = Conversation(
+custom_vicuna_video_caption = Conversation(
     system="You are an video language assistant. " "Precisely analyze sequences of consecutive frames to generate detailed descriptions.",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=[],
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+
+custom_vicuna_video_qa = Conversation(
+    system="You are an video language assistant. " "Precisely analyze sequences of consecutive frames and answer to the following question.",
     roles=("USER", "ASSISTANT"),
     version="v1",
     messages=[],
@@ -610,7 +621,8 @@ conv_templates = {
     "mpt": conv_mpt,
     "qwen_1_5": conv_qwen,
     "gemma_instruct": conv_gemma_instruct,
-    "custom_vicuna_video": custom_vicuna_video_v1,
+    "vicuna_video_caption": custom_vicuna_video_caption,
+    "vicuna_video_qa": custom_vicuna_video_qa,
 }
 
 if __name__ == "__main__":

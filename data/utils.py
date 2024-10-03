@@ -1,11 +1,12 @@
 import os
 import sys
 import logging
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout, redirect_stderr
 import subprocess
 
 import yt_dlp
 from PIL import Image
+import ffmpeg
 
 
 class DummyLogger(logging.Logger):
@@ -19,6 +20,11 @@ class DummyLogger(logging.Logger):
 def get_dummy_logger(name='dummy'):
     logging.setLoggerClass(DummyLogger)
     return logging.getLogger(name)
+
+
+def get_video_info(path):
+    probe = ffmpeg.probe(path)
+    return next(s for s in probe['streams'] if s['codec_type'] == 'video')
 
 
 def yt2pil(
@@ -43,7 +49,7 @@ def yt2pil(
         ),
         'cookiefile': cookie_path,
     }
-    with suppress_stderr(not debug):
+    with suppress_system(not debug):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             if 'entries' in info:
@@ -142,16 +148,24 @@ def yt2pil(
     return frames
 
 
-@contextmanager
-def suppress_stderr(enabled=True):
-    if enabled:
-        save = sys.stderr
-        devnull = os.devnull if sys.platform != 'win32' else 'nul'
-        try:
-            with open(devnull, 'w') as fnull:
-                sys.stderr = fnull
-                yield
-        finally:
-            sys.stderr = save
-    else:
-        yield
+class suppress_system:
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+        if enabled:
+            self.null_fds = [os.open(os.devnull, os.O_RDWR) for _ in range(2)]
+            self.save_fds = [os.dup(1), os.dup(2)]
+
+    def __enter__(self):
+        if self.enabled:
+            os.dup2(self.null_fds[0], 1)
+            os.dup2(self.null_fds[1], 2)
+            return self
+        else:
+            return None
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        os.dup2(self.save_fds[0], 1)
+        os.dup2(self.save_fds[1], 2)
+
+        for fd in self.null_fds + self.save_fds:
+            os.close(fd)

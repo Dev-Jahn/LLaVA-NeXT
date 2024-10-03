@@ -1001,13 +1001,13 @@ def train(attn_implementation=None):
             model = LlavaMptForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 config=config,
-                cache_dir=training_args.root_dir,
+                cache_dir=training_args.video_dir,
                 **bnb_model_from_pretrained_args
             )
         else:
             model = LlavaLlamaForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
-                cache_dir=training_args.root_dir,
+                cache_dir=training_args.video_dir,
                 attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args,
@@ -1016,7 +1016,7 @@ def train(attn_implementation=None):
     else:
         model = transformers.LlamaForCausalLM.from_pretrained(
             model_args.model_name_or_path,
-            cache_dir=training_args.root_dir,
+            cache_dir=training_args.video_dir,
             attn_implementation=attn_implementation,
             torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
             **bnb_model_from_pretrained_args
@@ -1063,14 +1063,14 @@ def train(attn_implementation=None):
     if 'mpt' in model_args.model_name_or_path:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
-            cache_dir=training_args.root_dir,
+            cache_dir=training_args.video_dir,
             model_max_length=training_args.model_max_length,
             padding_side="right"
         )
     else:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
-            cache_dir=training_args.root_dir,
+            cache_dir=training_args.video_dir,
             model_max_length=training_args.model_max_length,
             padding_side="right",
             use_fast=False,

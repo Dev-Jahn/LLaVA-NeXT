@@ -5,7 +5,7 @@ from functools import lru_cache
 from contextlib import contextmanager
 import multiprocessing as mp
 
-from datasets import load_from_disk, load_dataset
+from datasets import load_dataset
 from torch.utils.data import get_worker_info
 from yt_dlp.YoutubeDL import DownloadError
 from yt_dlp.utils import ExtractorError

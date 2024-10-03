@@ -7,7 +7,6 @@ import torch
 import transformers
 from transformers import TrainingArguments
 
-from data.internvid import InternVidDataset
 from llava.constants import IGNORE_INDEX
 from llava.conversation import Conversation, conv_templates
 from llava.mm_utils import get_model_name_from_path, process_images, tokenizer_image_token
@@ -15,6 +14,7 @@ from llava.model.builder import load_pretrained_model
 from llava.train.train import safe_save_model_for_hf_trainer, get_peft_state_maybe_zero_3, \
     get_peft_state_non_lora_maybe_zero_3
 from llava.train.llava_trainer import LLaVATrainer
+import data
 
 local_rank = None
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -28,7 +28,7 @@ class ModelArguments:
     num_voco: int = field()
     attn_implementation: str = field(default="sdpa")
     pretrain_mm_mlp_adapter: Optional[str] = field(default=None)
-    conv_name: str = field(default='custom_vicuna_video')
+    conv_name: str = field(default="vicuna_video_caption")
     version: Optional[str] = field(default="v0")
     freeze_backbone: bool = field(default=False)
     tune_mm_mlp_adapter: bool = field(default=False)
@@ -72,7 +72,7 @@ class TrainingArguments(TrainingArguments):
 
 def get_dataset(data_args: DataArguments, image_processor: Callable, text_processor: Callable):
     if data_args.dataset == "internvid":
-        return InternVidDataset(
+        return data.InternVidDataset(
             cache_dir=data_args.data_dir,
             fps=data_args.fps,
             max_frames=data_args.num_frames,
@@ -81,6 +81,17 @@ def get_dataset(data_args: DataArguments, image_processor: Callable, text_proces
             transform=image_processor,
             text_preprocess=text_processor,
             cookie_path=data_args.cookie_path,
+        )
+    elif 'activitynet' in data_args.dataset:
+        return data.ActivityNet(
+            root_dir=data_args.data_dir,
+            split='train',
+            labeltype=data_args.dataset.split('-')[-1],
+            n_frames=data_args.num_frames,
+            fps=data_args.fps,
+            frame_shape=(data_args.frame_size, data_args.frame_size),
+            transform=image_processor,
+            text_preprocess=text_processor,
         )
 
 
@@ -116,7 +127,7 @@ class VideoDataCollator:
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         if self.pad:
             input_ids, labels, videos = [[instance[key] for instance in instances] for key in
-                                         ['input_ids', 'labels', 'frames']]
+                                         ['input_ids', 'labels', 'video']]
             input_ids = torch.nn.utils.rnn.pad_sequence(
                 input_ids,
                 batch_first=True,
@@ -136,7 +147,7 @@ class VideoDataCollator:
             return batch
         else:
             input_ids, labels, videos = [[instance[key] for instance in instances] for key in
-                                         ['input_ids', 'labels', 'frames']]
+                                         ['input_ids', 'labels', 'video']]
             batch = dict(
                 input_ids=input_ids,
                 labels=labels,

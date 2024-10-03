@@ -1,3 +1,4 @@
+import numpy as np
 from PIL import Image
 from io import BytesIO
 import base64
@@ -91,7 +92,8 @@ def process_highres_image_crop_split(image, data_args, processor=None):
         processor = data_args.image_processor
     image_crop = resize_and_center_crop(image, crop_resolution)
     image_patches = extract_patches(image_crop, patch_size=split_resolution, overlap_ratio=0)
-    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in
+                     image_patches]
     return torch.stack(image_patches, dim=0)
 
 
@@ -112,7 +114,8 @@ def process_highres_image(image, processor, grid_pinpoints):
     image_padded = image_padded.resize((select_size, select_size))
     image_patches = extract_patches(image_padded, patch_size=processor.size["shortest_edge"], overlap_ratio=0)
     image_patches = [image_original_resize] + image_patches
-    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in
+                     image_patches]
     return torch.stack(image_patches, dim=0)
 
 
@@ -141,7 +144,8 @@ def select_best_resolution(original_size, possible_resolutions):
         effective_resolution = min(downscaled_width * downscaled_height, original_width * original_height)
         wasted_resolution = (width * height) - effective_resolution
 
-        if effective_resolution > max_effective_resolution or (effective_resolution == max_effective_resolution and wasted_resolution < min_wasted_resolution):
+        if effective_resolution > max_effective_resolution or (
+                effective_resolution == max_effective_resolution and wasted_resolution < min_wasted_resolution):
             max_effective_resolution = effective_resolution
             min_wasted_resolution = wasted_resolution
             best_fit = (width, height)
@@ -275,7 +279,8 @@ def process_anyres_image(image, processor, grid_pinpoints):
     # image_original_resize = image_padded_square.resize((processor.size['shortest_edge'], processor.size['shortest_edge']))
 
     image_patches = [image_original_resize] + patches
-    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in image_patches]
+    image_patches = [processor.preprocess(image_patch, return_tensors="pt")["pixel_values"][0] for image_patch in
+                     image_patches]
     return torch.stack(image_patches, dim=0)
 
 
@@ -284,6 +289,8 @@ def load_image_from_base64(image):
 
 
 def expand2square(pil_img, background_color):
+    if isinstance(pil_img, np.ndarray):
+        pil_img = Image.fromarray(pil_img)
     width, height = pil_img.size
     if width == height:
         return pil_img
@@ -372,7 +379,7 @@ class KeywordsStoppingCriteria(StoppingCriteria):
         offset = min(output_ids.shape[1] - self.start_len, 3)
         self.keyword_ids = [keyword_id.to(output_ids.device) for keyword_id in self.keyword_ids]
         for keyword_id in self.keyword_ids:
-            if output_ids[0, -keyword_id.shape[0] :] == keyword_id:
+            if output_ids[0, -keyword_id.shape[0]:] == keyword_id:
                 return True
         outputs = self.tokenizer.batch_decode(output_ids[:, -offset:], skip_special_tokens=True)[0]
         for keyword in self.keywords:

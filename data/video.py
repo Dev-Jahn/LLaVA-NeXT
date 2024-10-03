@@ -3,8 +3,6 @@ from typing import Optional, Dict, List, Callable, Literal
 from abc import ABC, abstractmethod
 import logging
 
-import decord
-from PIL import Image
 import av
 import numpy as np
 import cv2
@@ -12,47 +10,60 @@ import torch
 from torch.utils.data import Dataset, IterableDataset
 from decord import VideoReader, cpu
 
+from .utils import get_video_info, suppress_system
+
 BASE_KEYS = ['video_id', 'url', 'caption']
 
 
-def fast_resize_opencv(image_array, new_shape):
-    return cv2.resize(image_array, (new_shape[1], new_shape[0]), interpolation=cv2.INTER_LINEAR)
+def fast_resize_opencv(image_array, new_shape, letterbox=False):
+    if letterbox:
+        # TODO
+        raise NotImplementedError
+    else:
+        return cv2.resize(image_array, (new_shape[1], new_shape[0]), interpolation=cv2.INTER_LINEAR)
 
 
-def resize_loop(video_array, new_shape):
-    return [fast_resize_opencv(frame, new_shape) for frame in video_array]
+def resize_loop(video_array, new_shape, letterbox=False):
+    if letterbox:
+        # TODO
+        raise NotImplementedError
+    else:
+        return [fast_resize_opencv(frame, new_shape, letterbox) for frame in video_array]
 
 
-def resize_hack(video_array, new_shape):
+def resize_hack(video_array, new_shape, letterbox=False):
     """ news_shape: (W, H) """
-    N, H, W, C = video_array.shape
-    instack = video_array.transpose((1, 2, 3, 0)).reshape((H, W, C * N))
-    outstack = cv2.resize(instack, new_shape, interpolation=cv2.INTER_LINEAR)
-    return outstack.reshape((new_shape[1], new_shape[0], C, N)).transpose((3, 0, 1, 2))
+    if letterbox:
+        # TODO
+        raise NotImplementedError
+    else:
+        N, H, W, C = video_array.shape
+        instack = video_array.transpose((1, 2, 3, 0)).reshape((H, W, C * N))
+        outstack = cv2.resize(instack, new_shape, interpolation=cv2.INTER_LINEAR)
+        return outstack.reshape((new_shape[1], new_shape[0], C, N)).transpose((3, 0, 1, 2))
 
 
 class LocalVideoDataset(Dataset):
     def __init__(
             self,
-            root_dir: str,
+            video_dir: str,
             exts: List[str] = ('.mp4',),
-            fps: int = 1,
-            n_frames: int = 20,
-            frame_size: int = 336,
+            n_frames: int = 32,
+            fps: int = None,
+            frame_shape: int = (336, 336),
             transform: Optional[Callable] = None,
-            sample_strategy: Literal['fixed', 'dynamic'] = 'fixed',
     ):
+        assert (n_frames is None) != (fps is None), "n_frames and fps should be exclusive"
         # TODO: Frame resizing is currently not done by dataset. May need perf comparison.
-        self.root_dir = root_dir
+        self.video_dir = video_dir
         self.video_paths = self._get_video_paths(exts)
         self.fps = fps
         self.n_frames = n_frames
-        self.frame_size = frame_size
-        self.transform = transform
-        self.sample_strategy = sample_strategy
+        self.frame_shape = frame_shape
+        self.transform = transform if transform else lambda x: x
 
     def _get_video_paths(self, exts):
-        return [os.path.join(self.root_dir, f) for f in os.listdir(self.root_dir) if
+        return [os.path.join(self.video_dir, f) for f in os.listdir(self.video_dir) if
                 any(f.endswith(ext) for ext in exts)]
 
     def __len__(self):
@@ -60,39 +71,64 @@ class LocalVideoDataset(Dataset):
 
     def __getitem__(self, idx: int):
         video_path = self.video_paths[idx]
-        frames_array = self._load_video(video_path)
-        frames = frames_array if self.transform is None else self.transform(frames_array)
+        frames = self._load_video(video_path)
 
         return {
             'video_id': os.path.splitext(os.path.basename(video_path))[0],
             'video_path': video_path,
-            'frames': frames
+            'frames': self.transform(frames)
         }
 
-    def _load_video(self, video_path: str) -> np.array:
-        vr = VideoReader(video_path, ctx=cpu(0))
-        if self.sample_strategy == 'fixed':
-            timestamps = self._sample_fixed()
-            indices = (timestamps * vr.get_avg_fps()).round().astype(int)
-            # if video is shorter than n_frames, only sample the available frames
-            indices = indices[indices < len(vr)]
-        else:  # 'dynamic'
-            indices = np.linspace(0, len(vr), self.n_frames, endpoint=False).astype(int)
+    def _load_video(self, video_path: str, start: float = None, end: float = None) -> np.array:
+        # pre-resize to match shorter side for speed up
+        info = get_video_info(video_path)
+        target_w, target_h = self.frame_shape
+        origin_w, origin_h = int(info['width']), int(info['height'])
+        if origin_w < origin_h:
+            shape = (target_w, int(target_h * origin_h / origin_w))
+        else:
+            shape = (int(target_w * origin_w / origin_h), target_h)
+
+        vr = VideoReader(video_path, width=shape[0], height=shape[1], ctx=cpu(0))
+        start = start or 0.
+        end = end or vr.get_frame_timestamp(-1)[-1]
+        if self.fps is not None:
+            indices = self._sample_fps(vr, start, end)
+        else:
+            indices = self._sample_n_frames(vr, start, end)
         # batched resizing
-        if len(indices) <= 512:
-            return resize_hack(vr.get_batch(indices).asnumpy(), (self.frame_size, self.frame_size))
-        else:
-            return resize_loop(vr.get_batch(indices).asnumpy(), (self.frame_size, self.frame_size))
+        with suppress_system():
+            if len(indices) <= 512:
+                # return resize_hack(vr.get_batch(indices).asnumpy(), self.frame_shape)
+                return vr.get_batch(indices).asnumpy()
+            else:
+                # return resize_loop(vr.get_batch(indices).asnumpy(), self.frame_shape)
+                return vr.get_batch(indices).asnumpy()
 
-    def _sample_fixed(self):
-        interval = 1 / self.fps
-        return np.array([i * interval for i in range(self.n_frames)])
+    def _sample_fps(self, vr, start, end):
+        video_fps = vr.get_avg_fps()
+        start_frame = int(start * video_fps)
+        end_frame = int(end * video_fps)
 
-    def _sample_dynamic(self, num_frames, duration):
-        if num_frames <= self.n_frames:
-            return [i * (duration / num_frames) for i in range(num_frames)]
-        else:
-            return [i * (duration / (self.n_frames - 1)) for i in range(self.n_frames)]
+        target_duration = end - start
+        target_frame_count = int(target_duration * self.fps)
+
+        if target_frame_count <= 1:
+            return [start_frame]
+
+        indices = np.linspace(start_frame, end_frame, num=target_frame_count, dtype=int)
+        return list(indices)
+
+    def _sample_n_frames(self, vr, start, end):
+        video_fps = vr.get_avg_fps()
+        start_frame = int(start * video_fps)
+        end_frame = int(end * video_fps)
+
+        if self.n_frames <= 1:
+            return [start_frame]
+
+        indices = np.linspace(start_frame, end_frame, num=self.n_frames, dtype=int)
+        return list(indices)
 
 
 class VideoStreamDataset(IterableDataset, ABC):
