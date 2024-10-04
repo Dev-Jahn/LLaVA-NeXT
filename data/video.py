@@ -7,6 +7,8 @@ import av
 import numpy as np
 import cv2
 import torch
+from fontTools.misc.timeTools import timestampSinceEpoch
+from pyarrow import timestamp
 from torch.utils.data import Dataset, IterableDataset
 from decord import VideoReader, cpu
 
@@ -96,6 +98,13 @@ class LocalVideoDataset(Dataset):
             indices = self._sample_fps(vr, start, end)
         else:
             indices = self._sample_n_frames(vr, start, end)
+        ##################################
+        # DEBUG
+        # from torch.distributed import get_rank
+        # print(f'[rank {get_rank()}] video length: {len(vr)}')
+        # print(f"[rank {get_rank()}] Indices: {indices}")
+        ##################################
+
         # batched resizing
         with suppress_system():
             if len(indices) <= 512:
@@ -106,29 +115,24 @@ class LocalVideoDataset(Dataset):
                 return vr.get_batch(indices).asnumpy()
 
     def _sample_fps(self, vr, start, end):
-        video_fps = vr.get_avg_fps()
-        start_frame = int(start * video_fps)
-        end_frame = int(end * video_fps)
-
-        target_duration = end - start
-        target_frame_count = int(target_duration * self.fps)
-
+        duration = end - start
+        target_frame_count = int(duration * self.fps)
         if target_frame_count <= 1:
-            return [start_frame]
-
-        indices = np.linspace(start_frame, end_frame, num=target_frame_count, dtype=int)
-        return list(indices)
+            return [self._get_nearest_idx(vr, start)]
+        timestamps = vr.get_frame_timestamp(range(len(vr)))
+        targets = np.linspace(start, end, num=target_frame_count)
+        return [self._get_nearest_idx(timestamps, t) for t in targets]
 
     def _sample_n_frames(self, vr, start, end):
-        video_fps = vr.get_avg_fps()
-        start_frame = int(start * video_fps)
-        end_frame = int(end * video_fps)
-
         if self.n_frames <= 1:
-            return [start_frame]
+            return [self._get_nearest_idx(vr, start)]
+        timestamps = vr.get_frame_timestamp(range(len(vr)))
+        targets = np.linspace(start, end, num=self.n_frames)
+        return [self._get_nearest_idx(timestamps, t) for t in targets]
 
-        indices = np.linspace(start_frame, end_frame, num=self.n_frames, dtype=int)
-        return list(indices)
+    def _get_nearest_idx(self, timestamps, target):
+        frame_centers = (timestamps[:, 0] + timestamps[:, 1]) / 2
+        return np.abs(frame_centers - target).argmin()
 
 
 class VideoStreamDataset(IterableDataset, ABC):

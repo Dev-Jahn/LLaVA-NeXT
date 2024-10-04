@@ -16,21 +16,13 @@ def build_command(config):
     cmd = config['base_command']
 
     for key, value in config['training_params'].items():
-        if isinstance(value, bool):
-            if value:
-                cmd.append(f"--{key}")
-        else:
-            cmd.append(f"--{key}")
-            cmd.append(str(value))
+        cmd.append(f"--{key}")
+        cmd.append(str(value))
 
     for key, value in config.get('optional_params', {}).items():
         if value is not None:
-            if isinstance(value, bool):
-                if value:
-                    cmd.append(f"--{key}")
-            else:
-                cmd.append(f"--{key}")
-                cmd.append(str(value))
+            cmd.append(f"--{key}")
+            cmd.append(str(value))
 
     return cmd
 
@@ -39,8 +31,10 @@ def main():
     args = parser.parse_args()
     config = load_config(args.config)
     os.environ['CUDA_VISIBLE_DEVICES'] = config['cuda_devices']
+    os.environ['WANDB_PROJECT'] = config['wandb_project']
     cmd = build_command(config)
     print("Executing command:", ' '.join(cmd))
+    # os.system('echo $CUDA_VISIBLE_DEVICES')
     subprocess.run(cmd)
 
 

@@ -223,11 +223,7 @@ class VoCoLlamaModel(LlamaPreTrainedModel):
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
         if self.gradient_checkpointing and self.training:
-            if use_cache:
-                logger.warning_once(
-                    "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
-                )
-                use_cache = False
+            use_cache = False
 
         past_key_values_length = 0
         if use_cache:
@@ -254,11 +250,6 @@ class VoCoLlamaModel(LlamaPreTrainedModel):
             # the manual implementation that requires a 4D causal mask in all cases.
             _2d_attention_mask_b = attention_mask
 
-            if attention_mask is None:
-                print("attention_mask is None")
-            else:
-                print('before prepare', attention_mask.shape)
-            print('batch_size, seq_length', batch_size, seq_length)
             attention_mask = _prepare_4d_causal_attention_mask_for_sdpa(
                 attention_mask,
                 (batch_size, seq_length),
@@ -281,8 +272,6 @@ class VoCoLlamaModel(LlamaPreTrainedModel):
                 inputs_embeds.dtype
             )
             attention_mask_voco = torch.where(attention_mask_voco == 1, torch.tensor(0), mask_min)
-            print(f"attention_mask shape: {attention_mask.shape}")
-            print(f"attention_mask_voco shape: {attention_mask_voco.shape}")
             attention_mask = attention_mask + attention_mask_voco
             attention_mask = torch.where(attention_mask < 0, mask_min, torch.tensor(0)).to(inputs_embeds.dtype)
 

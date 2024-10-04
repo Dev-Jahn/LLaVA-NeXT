@@ -5,12 +5,12 @@ import warnings
 
 import torch
 import transformers
-from transformers import TrainingArguments
+from transformers import TrainingArguments, AutoTokenizer
 
+from llava import VoCoLlamaForVideo
 from llava.constants import IGNORE_INDEX
 from llava.conversation import Conversation, conv_templates
-from llava.mm_utils import get_model_name_from_path, process_images, tokenizer_image_token
-from llava.model.builder import load_pretrained_model
+from llava.mm_utils import process_images, tokenizer_image_token
 from llava.train.train import safe_save_model_for_hf_trainer, get_peft_state_maybe_zero_3, \
     get_peft_state_non_lora_maybe_zero_3
 from llava.train.llava_trainer import LLaVATrainer
@@ -95,21 +95,34 @@ def get_dataset(data_args: DataArguments, image_processor: Callable, text_proces
         )
 
 
-def process_caption(caption: str, tokenizer, conv: Conversation, num_voco: int) -> Dict[str, torch.Tensor]:
+def process_text(input_dict: dict, tokenizer, conv: Conversation, num_voco: int) -> Dict[str, torch.Tensor]:
     conv = conv.copy()
-    conv.append_message(
-        conv.roles[0],
-        "Describe the main visual content or key elements you observe in each video clip in a single lowercase sentence."
-    )
-    conv.append_message(
-        conv.roles[1],
-        caption
-    )
+    if 'caption' in input_dict:
+        conv.append_message(
+            conv.roles[1],
+            input_dict['caption'],
+        )
+    elif 'q' in input_dict and 'a' in input_dict:
+        conv.append_message(
+            conv.roles[0],
+            input_dict['q'],
+        )
+        conv.append_message(
+            conv.roles[1],
+            input_dict['a'],
+        )
+    else:
+        raise ValueError("Invalid input_dict keys")
     prompt = f"<image>\n{'<voco>' * num_voco}\n{conv.get_prompt()}"
     input_ids = tokenizer_image_token(prompt, tokenizer, return_tensors='pt')
     targets = torch.full_like(input_ids, IGNORE_INDEX)
-    cap_len = len(tokenizer(caption, return_attention_mask=False)['input_ids'])
-    targets[-cap_len:] = input_ids[-cap_len:]
+    if 'caption' in input_dict:
+        cap_len = len(tokenizer(input_dict['caption'], return_attention_mask=False)['input_ids'])
+        targets[-cap_len:] = input_ids[-cap_len:]
+    elif 'q' in input_dict and 'a' in input_dict:
+        a_len = len(tokenizer(input_dict['a'], return_attention_mask=False)['input_ids'])
+        targets[-a_len:] = input_ids[-a_len:]
+
     return dict(
         input_ids=input_ids,
         labels=targets,
@@ -122,38 +135,29 @@ class VideoDataCollator:
     Does not pad tensors to avoid redundant jobs
     """
     tokenizer: transformers.PreTrainedTokenizer
-    pad: bool = False
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        if self.pad:
-            input_ids, labels, videos = [[instance[key] for instance in instances] for key in
-                                         ['input_ids', 'labels', 'video']]
-            input_ids = torch.nn.utils.rnn.pad_sequence(
-                input_ids,
-                batch_first=True,
-                padding_value=self.tokenizer.pad_token_id)
-            labels = torch.nn.utils.rnn.pad_sequence(labels,
-                                                     batch_first=True,
-                                                     padding_value=IGNORE_INDEX)
-            input_ids = input_ids[:, :self.tokenizer.model_max_length]
-            labels = labels[:, :self.tokenizer.model_max_length]
-            # TODO: Currently not considering video batch with jagged frames
-            batch = dict(
-                input_ids=input_ids,
-                labels=labels,
-                attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
-                videos=torch.stack(videos)
-            )
-            return batch
-        else:
-            input_ids, labels, videos = [[instance[key] for instance in instances] for key in
-                                         ['input_ids', 'labels', 'video']]
-            batch = dict(
-                input_ids=input_ids,
-                labels=labels,
-                videos=videos
-            )
-            return batch
+        # from torch.distributed import get_rank
+        # print(f'[rank {get_rank()}] collated {len(instances)} samples')
+        input_ids, labels, videos = [[instance[key] for instance in instances] for key in
+                                     ['input_ids', 'labels', 'video']]
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            input_ids,
+            batch_first=True,
+            padding_value=self.tokenizer.pad_token_id)
+        labels = torch.nn.utils.rnn.pad_sequence(labels,
+                                                 batch_first=True,
+                                                 padding_value=IGNORE_INDEX)
+        input_ids = input_ids[:, :self.tokenizer.model_max_length]
+        labels = labels[:, :self.tokenizer.model_max_length]
+        # TODO: Currently not considering video batch with differenct number of frames
+        batch = dict(
+            input_ids=input_ids,
+            labels=labels,
+            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+            videos=torch.stack(videos)
+        )
+        return batch
 
 
 def main():
@@ -162,16 +166,25 @@ def main():
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     # Prepare model and tokenizer
-    model_name = get_model_name_from_path(model_args.model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(
-        model_args.model_path, None, model_name, init_vision=True,
+    tokenizer = AutoTokenizer.from_pretrained(model_args.model_path)
+    model = VoCoLlamaForVideo.from_pretrained(
+        model_args.model_path,
         attn_implementation=model_args.attn_implementation,
-        deepspeed='zero3'
     )
+    model.model.vision_tower.load_model()
+    # tokenizer, model, image_processor, context_len = load_pretrained_model(
+    #     model_args.model_path, None, model_name, init_vision=True,
+    #     attn_implementation=model_args.attn_implementation,
+    #     deepspeed='zero3'
+    # )
+    if not hasattr(model.config, 'voco_token_id'):
+        model.config.voco_token_id = tokenizer.additional_special_tokens_ids[0]
+        model.config.num_voco_tokens = model_args.num_voco
+
     # Prepare dataset
     conv = conv_templates[model_args.conv_name]
     image_processor = lambda images: process_images(images, model.get_vision_tower().image_processor, model.config)
-    text_processor = lambda text: process_caption(text, tokenizer, conv, model_args.num_voco)
+    text_processor = lambda input_dict: process_text(input_dict, tokenizer, conv, model_args.num_voco)
     dataset = get_dataset(data_args, image_processor, text_processor)
 
     # Prepare trainer
@@ -186,7 +199,6 @@ def main():
 
     # Start training
     trainer.train()
-    trainer.save_state(trainer)
 
     # Save the final model
     if training_args.lora_enable:
@@ -203,8 +215,10 @@ def main():
             torch.save(non_lora_state_dict, os.path.join(
                 training_args.output_dir, 'non_lora_trainables.bin'))
     else:
-        safe_save_model_for_hf_trainer(trainer=trainer,
-                                       output_dir=training_args.output_dir)
+        trainer.save_model(training_args.output_dir)
+        trainer.save_state()
+        # safe_save_model_for_hf_trainer(trainer=trainer,
+        #                                output_dir=training_args.output_dir)
 
 
 if __name__ == "__main__":

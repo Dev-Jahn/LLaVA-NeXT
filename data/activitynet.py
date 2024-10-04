@@ -17,9 +17,10 @@ class ActivityNet(LocalVideoDataset):
             n_frames: int = 32,
             fps: int = None,
             frame_shape: Tuple[int] = (336, 336),
-            transform: Optional[Callable] = None,
-            text_preprocess: Optional[Callable] = None
+            transform: Optional[Callable] = lambda x: x,
+            text_preprocess: Optional[Callable] = lambda x: x,
     ):
+        root_dir = os.path.expanduser(root_dir)
         video_dir = os.path.join(root_dir, 'videos', 'trainval' if split in ['train', 'val'] else 'test')
         super().__init__(video_dir, exts, n_frames=n_frames, fps=fps, frame_shape=frame_shape, transform=transform)
         self.root_dir = root_dir
@@ -42,7 +43,7 @@ class ActivityNet(LocalVideoDataset):
                     labels.append({
                         'video_id': video_id,
                         'timestamp': timestamp,
-                        'caption': data['sentences'][i],
+                        'caption': data['sentences'][i].strip(),
                     })
         elif self.labeltype == 'qa':
             with open(os.path.join(self.root_dir, 'qa', f'{self.split}_q.json'), 'r') as f:
@@ -53,8 +54,8 @@ class ActivityNet(LocalVideoDataset):
             for q in questions:
                 labels.append({
                     'video_id': 'v_' + q['video_name'],
-                    'q': q['question'].capitalize() + '?',
-                    'a': answers[q['question_id']]['answer'].capitalize(),
+                    'q': q['question'].capitalize().strip() + '?',
+                    'a': answers[q['question_id']]['answer'].capitalize().strip() + '.',
                 })
         elif self.labeltype == 'instruct':
             with open(os.path.join(self.root_dir, 'VideoInstruct100K.json'), 'r') as f:
@@ -81,13 +82,12 @@ class ActivityNet(LocalVideoDataset):
             label = self.labels[idx]
             start, end = label.get('timestamp', (None, None))
             frames = self._load_video(
-               self.id_path_map[label['video_id']],
+                self.id_path_map[label['video_id']],
                 start=start, end=end
             )
             return dict({
                 'video': self.transform(frames),
-                **{k: self.text_preprocess(v) if k != 'video_id' and isinstance(v, str) else v for k, v in
-                   label.items()}
+                **self.text_preprocess(label),
             })
 
     def __repr__(self):

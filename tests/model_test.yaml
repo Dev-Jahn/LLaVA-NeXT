@@ -1,18 +1,15 @@
-cuda_devices: "0,1,2,3,4,5,6,7"
-wandb_project: "video"
+cuda_devices: "1,2,3,4,5,6,7"
 
 base_command:
   - accelerate
   - launch
   - --config_file
   - scripts/accelerate.yaml
-  - llava/train/train_voco_video.py
+  - tests/model_test.py
 
 training_params:
-  run_name: "voco-7b-video-anet_caption-lr4e5"
   attn_implementation: sdpa
-#  max_steps: 3 #testing
-  num_train_epochs: 2
+  max_steps: 10 #testing
   model_path: checkpoints/voco_llama_ckpt_0807
   data_dir: /data/datasets/ActivityNet
   num_voco: 2
@@ -23,28 +20,28 @@ training_params:
   frame_size: 336
   freeze_mm_mlp_adapter: true
   model_max_length: 2048
-  output_dir: checkpoints/voco-7b-video
-  per_device_train_batch_size: 32 # overrided by zero3.json
-  per_device_eval_batch_size: 4
-  gradient_accumulation_steps: 1
   bf16: true
+  tf32: true
+  output_dir: checkpoints/voco-7b-video
+#  per_device_train_batch_size: overrided by zero3.json
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 1
   evaluation_strategy: "no"
   save_strategy: "steps"
-  save_steps: 50
+  save_steps: 10
   save_total_limit: 10
-  learning_rate: 4e-5
+  learning_rate: 2e-5
   weight_decay: 0.0
   warmup_ratio: 0.03
   lr_scheduler_type: "cosine"
   logging_steps: 1
   gradient_checkpointing: true
-#  dataloader_persistent_workers: false
+  dataloader_persistent_workers: true
   dataloader_num_workers: 1
   dataloader_prefetch_factor: 1
-  report_to: wandb
+#  report_to: wandb
 
 #optional_params:
-#  tf32: true
   # num_train_epochs: 1
   # fps: 1
   # freeze_backbone: true

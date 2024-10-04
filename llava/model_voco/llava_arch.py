@@ -391,8 +391,8 @@ class VoCoMetaForCausalLM(ABC):
 
 class VoCoConfig(LlamaConfig):
     model_type = "llava_voco_llama"
-    voco_token_id: int
-    num_voco_tokens: int
+    voco_token_id: int = 32000
+    num_voco_tokens: int = 2
 
 
 class VoCoMetaForVideo(VoCoMetaForCausalLM):
@@ -461,6 +461,8 @@ class VoCoMetaForVideo(VoCoMetaForCausalLM):
             out = self.get_model().forward(inputs_embeds=weaved,
                                            attention_mask=attention_mask)
             # out.last_hidden_state Shape : (num_frames, 576+num_voco+extra, 4096)
+        from torch.distributed import get_rank
+
         return out.last_hidden_state[:, -self.config.num_voco_tokens:, :]  # Shape : (num_frames, num_voco, 4096)
 
     def prepare_inputs_labels_for_video(
@@ -472,7 +474,8 @@ class VoCoMetaForVideo(VoCoMetaForCausalLM):
             labels,
             videos,
     ):
-        if self.get_vision_tower() is None or videos is None or input_ids.shape[1] == 1:
+        if self.get_vision_tower() is None or videos is None or (
+                isinstance(input_ids, torch.Tensor) and input_ids.shape[1] == 1):
             return input_ids, position_ids, attention_mask, past_key_values, None, labels, None
 
         # batch x (num_frames, num_voco, 4096)

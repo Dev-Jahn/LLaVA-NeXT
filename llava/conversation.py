@@ -574,10 +574,12 @@ Answer the questions.""",
 )
 
 custom_vicuna_video_caption = Conversation(
-    system="You are an video language assistant. " "Precisely analyze sequences of consecutive frames to generate detailed descriptions.",
+    system="You are an video language assistant. " "Precisely analyze sequences of consecutive frames and follow the user\'s instruction.",
     roles=("USER", "ASSISTANT"),
     version="v1",
-    messages=[],
+    messages=[
+        ("USER", "Describe the main visual content or key elements you observe in the video clip in a single sentence."),
+    ],
     offset=0,
     sep_style=SeparatorStyle.TWO,
     sep=" ",
