@@ -605,6 +605,7 @@ class VoCoLlamaForCausalLM(LlamaPreTrainedModel, VoCoMetaForCausalLM):
 
 class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
     _tied_weights_keys = ["lm_head.weight"]
+    _keys_to_ignore_on_load_unexpected = ['model\.vision_tower.*']
     config_class = VoCoConfig
 
     def __init__(self, config: VoCoConfig):
@@ -651,8 +652,8 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
             output_hidden_states: Optional[bool] = None,
             videos: Optional[torch.FloatTensor] = None,
             return_dict: Optional[bool] = None,
+            voco_loc_back=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-        voco_loc_back = None
         if inputs_embeds is None:
             (
                 input_ids,
@@ -727,9 +728,8 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
     @torch.no_grad()
     def generate(
             self,
-            inputs: Optional[torch.Tensor] = None,
+            input_ids: Optional[torch.Tensor] = None,
             videos: Optional[torch.Tensor] = None,
-            image_sizes: Optional[torch.Tensor] = None,
             **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         position_ids = kwargs.pop("position_ids", None)
@@ -739,38 +739,36 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
 
         if videos is not None:
             (
-                inputs,
+                input_ids,
                 position_ids,
                 attention_mask,
                 _,
                 inputs_embeds,
                 _,
                 voco_loc_back
-            ) = self.prepare_inputs_labels_for_multimodal(
-                inputs,
+            ) = self.prepare_inputs_labels_for_video(
+                input_ids,
                 position_ids,
                 attention_mask,
                 None,
                 None,
                 videos,
-                image_sizes=image_sizes
             )
         else:
-            inputs_embeds = self.get_model().embed_tokens(inputs)
+            inputs_embeds = self.get_model().embed_tokens(input_ids)
+            voco_loc_back = None
 
         return super().generate(
             position_ids=position_ids,
             attention_mask=attention_mask,
             inputs_embeds=inputs_embeds,
+            voco_loc_back=voco_loc_back,
+            videos=videos,
             **kwargs
         )
 
-    def prepare_inputs_for_generation(self, input_ids, past_key_values=None,
-                                      inputs_embeds=None, **kwargs):
-        videos = kwargs.pop("videos", None)
-        image_sizes = kwargs.pop("image_sizes", None)
-        voco_loc_back = kwargs.pop("voco_loc_back", None)
-
+    def prepare_inputs_for_generation(self, input_ids, videos=None, voco_loc_back=None,
+                                      past_key_values=None, inputs_embeds=None, **kwargs):
         inputs = self.prepare_inputs_for_generation_llama(
             input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs
         )
@@ -779,8 +777,6 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
             inputs['voco_loc_back'] = voco_loc_back
         if videos is not None:
             inputs['videos'] = videos
-        if image_sizes is not None:
-            inputs['image_sizes'] = image_sizes
         return inputs
 
     def prepare_inputs_for_generation_llama(
@@ -824,7 +820,7 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
                 position_ids = position_ids[:, -input_ids.shape[1]:]
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
+        if inputs_embeds is not None and (past_key_values is None or cache_length == 0):
             model_inputs = {"inputs_embeds": inputs_embeds}
         else:
             model_inputs = {"input_ids": input_ids}
@@ -840,7 +836,7 @@ class VoCoLlamaForVideo(LlamaPreTrainedModel, VoCoMetaForVideo):
         return model_inputs
 
     @staticmethod
-    def _reorder_cache(past_key_values, beam_idx):
+    def _reorder_cache(past_key_values, beam_idx, **kwargs):
         reordered_past = ()
         for layer_past in past_key_values:
             reordered_past += (

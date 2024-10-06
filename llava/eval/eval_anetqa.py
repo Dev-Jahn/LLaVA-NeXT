@@ -44,7 +44,6 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     dataset: str = field()
-    data_split: str = field(default="train")
     cookie_path: Optional[str] = field(default=None)
     data_dir: Optional[str] = field(default=None, metadata={"help": "Path to the data directory."})
     fps: Optional[int] = None
@@ -86,7 +85,7 @@ def get_dataset(data_args: DataArguments, image_processor: Callable, text_proces
     elif 'activitynet' in data_args.dataset:
         return data.ActivityNet(
             root_dir=data_args.data_dir,
-            split=data_args.data_split,
+            split='train',
             labeltype=data_args.dataset.split('-')[-1],
             n_frames=data_args.num_frames,
             fps=data_args.fps,
@@ -96,34 +95,38 @@ def get_dataset(data_args: DataArguments, image_processor: Callable, text_proces
         )
 
 
-def process_text(input_dict: dict, tokenizer, conv: Conversation, num_voco: int, only_prompt=False):
+def process_text(input_dict: dict, tokenizer, conv: Conversation, num_voco: int) -> Dict[str, torch.Tensor]:
     conv = conv.copy()
-    match input_dict:
-        case {'caption': caption}:
-            if not only_prompt:
-                conv.append_message(conv.roles[1], caption)
-        case {'q': q, 'a': a}:
-            conv.append_message(conv.roles[0], q)
-            if not only_prompt:
-                conv.append_message(conv.roles[1], a)
-        case {'q': q}:
-            conv.append_message(conv.roles[0], q)
-        case _:
-            raise ValueError("Invalid input_dict keys")
-
+    if 'caption' in input_dict:
+        conv.append_message(
+            conv.roles[1],
+            input_dict['caption'],
+        )
+    elif 'q' in input_dict and 'a' in input_dict:
+        conv.append_message(
+            conv.roles[0],
+            input_dict['q'],
+        )
+        conv.append_message(
+            conv.roles[1],
+            input_dict['a'],
+        )
+    else:
+        raise ValueError("Invalid input_dict keys")
     prompt = f"<image>\n{'<voco>' * num_voco}\n{conv.get_prompt()}"
     input_ids = tokenizer_image_token(prompt, tokenizer, return_tensors='pt')
-    output = {'input_ids': input_ids, 'labels': None}
-    if not only_prompt:
-        targets = torch.full_like(input_ids, IGNORE_INDEX)
-        if 'caption' in input_dict:
-            cap_len = len(tokenizer(input_dict['caption'], return_attention_mask=False)['input_ids'])
-            targets[-cap_len:] = input_ids[-cap_len:]
-        elif 'q' in input_dict and 'a' in input_dict:
-            a_len = len(tokenizer(input_dict['a'], return_attention_mask=False)['input_ids'])
-            targets[-a_len:] = input_ids[-a_len:]
-        output['labels'] = targets
-    return output
+    targets = torch.full_like(input_ids, IGNORE_INDEX)
+    if 'caption' in input_dict:
+        cap_len = len(tokenizer(input_dict['caption'], return_attention_mask=False)['input_ids'])
+        targets[-cap_len:] = input_ids[-cap_len:]
+    elif 'q' in input_dict and 'a' in input_dict:
+        a_len = len(tokenizer(input_dict['a'], return_attention_mask=False)['input_ids'])
+        targets[-a_len:] = input_ids[-a_len:]
+
+    return dict(
+        input_ids=input_ids,
+        labels=targets,
+    )
 
 
 @dataclass
@@ -134,24 +137,26 @@ class VideoDataCollator:
     tokenizer: transformers.PreTrainedTokenizer
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids = [instance['input_ids'] for instance in instances]
-        labels = [instance['labels'] for instance in instances] if instances[0].get('labels') is not None else None
-        videos = [instance['video'] for instance in instances] if instances[0].get('video') is not None else None
+        # from torch.distributed import get_rank
+        # print(f'[rank {get_rank()}] collated {len(instances)} samples')
+        input_ids, labels, videos = [[instance[key] for instance in instances] for key in
+                                     ['input_ids', 'labels', 'video']]
         input_ids = torch.nn.utils.rnn.pad_sequence(
             input_ids,
             batch_first=True,
             padding_value=self.tokenizer.pad_token_id)
         labels = torch.nn.utils.rnn.pad_sequence(labels,
                                                  batch_first=True,
-                                                 padding_value=IGNORE_INDEX) if labels is not None else None
+                                                 padding_value=IGNORE_INDEX)
         input_ids = input_ids[:, :self.tokenizer.model_max_length]
-        labels = labels[:, :self.tokenizer.model_max_length] if labels is not None else None
-        batch = {'input_ids': input_ids, 'attention_mask': input_ids.ne(self.tokenizer.pad_token_id)}
-        if labels is not None:
-            batch['labels'] = labels
-        if videos is not None:
-            # TODO: Currently not considering video batch with differenct number of frames
-            batch['videos'] = torch.stack(videos)
+        labels = labels[:, :self.tokenizer.model_max_length]
+        # TODO: Currently not considering video batch with differenct number of frames
+        batch = dict(
+            input_ids=input_ids,
+            labels=labels,
+            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+            videos=torch.stack(videos)
+        )
         return batch
 
 

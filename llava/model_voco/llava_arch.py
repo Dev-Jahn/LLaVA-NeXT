@@ -456,13 +456,11 @@ class VoCoMetaForVideo(VoCoMetaForCausalLM):
             trunc = input_ids_single[:torch.argwhere(input_ids_single == self.config.voco_token_id)[-1] + 1]
             # slice the input_ids into segments and weave them with features
             weaved, _, _ = self.weave(trunc, features, broadcast=True)
-            # Forward through the model
             attention_mask = torch.ones(weaved.shape[:2], dtype=torch.bool, device=weaved.device)
+            # Forward through the model
             out = self.get_model().forward(inputs_embeds=weaved,
                                            attention_mask=attention_mask)
             # out.last_hidden_state Shape : (num_frames, 576+num_voco+extra, 4096)
-        from torch.distributed import get_rank
-
         return out.last_hidden_state[:, -self.config.num_voco_tokens:, :]  # Shape : (num_frames, num_voco, 4096)
 
     def prepare_inputs_labels_for_video(
@@ -478,6 +476,9 @@ class VoCoMetaForVideo(VoCoMetaForCausalLM):
                 isinstance(input_ids, torch.Tensor) and input_ids.shape[1] == 1):
             return input_ids, position_ids, attention_mask, past_key_values, None, labels, None
 
+        if labels is None:
+            labels = [None] * len(input_ids)
+
         # batch x (num_frames, num_voco, 4096)
         compressed_features = [self.encode_video(ids, video) for ids, video in zip(input_ids, videos)]
         weaved = [self.weave(ids, features, labels=label, attention_mask=mask) for ids, features, label, mask in
@@ -489,7 +490,7 @@ class VoCoMetaForVideo(VoCoMetaForCausalLM):
             pad_sequence([t.flip(dims=[0]) for t in tensors], batch_first=True, padding_value=value).flip(dims=[1])
         )
         input_embeds = pad_left(input_embeds, 0)
-        labels = pad_left(labels, IGNORE_INDEX)
+        labels = pad_left(labels, IGNORE_INDEX) if labels[0] is not None else None
         if position_ids is not None:
             position_ids = pad_left([torch.arange(0, mask.shape[0], device=mask.device) for mask in attention_mask], 0)
         # position_ids = pad_left([torch.arange(0, mask.shape[0], device=mask.device) for mask in attention_mask], 0)

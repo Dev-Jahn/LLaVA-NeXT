@@ -574,7 +574,7 @@ Answer the questions.""",
 )
 
 custom_vicuna_video_caption = Conversation(
-    system="You are an video language assistant. " "Precisely analyze sequences of consecutive frames and follow the user\'s instruction.",
+    system="You are a video language assistant. " "Precisely analyze sequences of consecutive frames and follow the user\'s instruction.",
     roles=("USER", "ASSISTANT"),
     version="v1",
     messages=[
@@ -587,7 +587,7 @@ custom_vicuna_video_caption = Conversation(
 )
 
 custom_vicuna_video_qa = Conversation(
-    system="You are an video language assistant. " "Precisely analyze sequences of consecutive frames and answer to the following question.",
+    system="You are a video language assistant. " "Precisely analyze sequences of consecutive frames and answer to the following question.",
     roles=("USER", "ASSISTANT"),
     version="v1",
     messages=[],
