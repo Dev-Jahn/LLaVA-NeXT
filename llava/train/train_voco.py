@@ -35,8 +35,7 @@ from torch.utils.data import Dataset
 from llava.conversation import Conversation
 from llava.train.llava_trainer import LLaVATrainer
 
-from llava import conversation as conversation_lib
-from llava.model import *
+from llava import conversation as conversation_lib, VoCoLlamaForCausalLM
 from llava.mm_utils import tokenizer_image_token
 
 from PIL import Image
@@ -82,11 +81,13 @@ class DataArguments:
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
+    num_voco: int = field(default=2)
     cache_dir: Optional[str] = field(default=None)
     optim: str = field(default="adamw_torch")
     remove_unused_columns: bool = field(default=False)
     freeze_mm_mlp_adapter: bool = field(default=False)
     mpt_attn_impl: Optional[str] = field(default="triton")
+    attn_implementation: Optional[str] = field(default="sdpa")
     model_max_length: int = field(
         default=512,
         metadata={
@@ -420,7 +421,8 @@ def preprocess_llama_2(
 def preprocess_v1(
         sources,
         tokenizer: transformers.PreTrainedTokenizer,
-        conv:Conversation,
+        conv: Conversation,
+        num_voco: int,
         has_image: bool = False,
 ) -> Dict:
     conv = conv.copy()
@@ -446,7 +448,7 @@ def preprocess_v1(
     # token num
     if has_image:
         maybe_voco_str = "".join(
-            ["<voco>" for _ in range(2)]
+            ["<voco>" for _ in range(num_voco)]
         )
         # conversations = [f"<image>\n{maybe_voco_str}\n" + conversations[0].replace("<image>\n", '')]
         conversations = [f"<image>\n{maybe_voco_str}\n" + conversations[0].replace("<image>", '').replace("\n", '')]
@@ -624,6 +626,7 @@ def preprocess_plain(
 def preprocess(
         sources: Sequence[str],
         tokenizer: transformers.PreTrainedTokenizer,
+        num_voco: int,
         has_image: bool = False
 ) -> Dict:
     """
@@ -638,7 +641,11 @@ def preprocess(
     if conversation_lib.default_conversation.sep_style == conversation_lib.SeparatorStyle.LLAMA_2:
         return preprocess_llama_2(sources, tokenizer, has_image=has_image)
     if conversation_lib.default_conversation.version.startswith("v1"):
-        return preprocess_v1(sources, tokenizer, conv=conversation_lib.default_conversation, has_image=has_image)
+        return preprocess_v1(
+            sources, tokenizer,
+            conv=conversation_lib.default_conversation, has_image=has_image,
+            num_voco=num_voco
+        )
     if conversation_lib.default_conversation.version == "mpt":
         return preprocess_mpt(sources, tokenizer, has_image=has_image)
     # add end signal and concatenate together
@@ -676,7 +683,7 @@ class LazySupervisedDataset(Dataset):
     def __init__(self, data_path: str,
                  tokenizer: transformers.PreTrainedTokenizer,
                  data_args: DataArguments,
-                 voco_token):
+                 num_voco):
         super(LazySupervisedDataset, self).__init__()
         list_data_dict = json.load(open(data_path, "r"))
 
@@ -684,7 +691,7 @@ class LazySupervisedDataset(Dataset):
         self.tokenizer = tokenizer
         self.list_data_dict = list_data_dict
         self.data_args = data_args
-        self.voco_token = voco_token
+        self.num_voco = num_voco
 
     def __len__(self):
         return len(self.list_data_dict)
@@ -743,7 +750,9 @@ class LazySupervisedDataset(Dataset):
         data_dict = preprocess(
             sources,
             self.tokenizer,
-            has_image=('image' in self.list_data_dict[i]))
+            has_image=('image' in self.list_data_dict[i]),
+            num_voco=self.num_voco
+        )
         if isinstance(i, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0],
                              labels=data_dict["labels"][0])
@@ -793,19 +802,19 @@ class DataCollatorForSupervisedDataset(object):
 
 
 def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
-                                data_args, voco_token) -> Dict:
+                                data_args, num_voco) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
     train_dataset = LazySupervisedDataset(tokenizer=tokenizer,
                                           data_path=data_args.data_path,
                                           data_args=data_args,
-                                          voco_token=voco_token)
+                                          num_voco=num_voco)
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     return dict(train_dataset=train_dataset,
                 eval_dataset=None,
                 data_collator=data_collator)
 
 
-def train(attn_implementation=None):
+def train():
     global local_rank
 
     parser = transformers.HfArgumentParser(
@@ -833,34 +842,18 @@ def train(attn_implementation=None):
             )
         ))
 
-    if model_args.vision_tower is not None:
-        if 'mpt' in model_args.model_name_or_path:
-            config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
-            config.attn_config['attn_impl'] = training_args.mpt_attn_impl
-            model = LlavaMptForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                config=config,
-                cache_dir=training_args.video_dir,
-                **bnb_model_from_pretrained_args
-            )
-        else:
-            print("use LlavaLlamaForCausalLM!!!")
-            model = LlavaLlamaForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.video_dir,
-                attn_implementation=attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                **bnb_model_from_pretrained_args
-            )
-    else:
-        model = transformers.LlamaForCausalLM.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.video_dir,
-            attn_implementation=attn_implementation,
-            torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-            **bnb_model_from_pretrained_args
-        )
+    model = VoCoLlamaForCausalLM.from_pretrained(
+        model_args.model_name_or_path,
+        cache_dir=training_args.cache_dir,
+        attn_implementation=training_args.attn_implementation,
+        torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+        **bnb_model_from_pretrained_args
+    )
+    model.config.num_voco_tokens = training_args.num_voco
     model.config.use_cache = False
+    # suppress the warning
+    model.generation_config.temperature = None
+    model.generation_config.top_p = None
 
     if model_args.freeze_backbone:
         model.model.requires_grad_(False)
@@ -898,21 +891,13 @@ def train(attn_implementation=None):
         rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
 
-    if 'mpt' in model_args.model_name_or_path:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.video_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="right"
-        )
-    else:
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.video_dir,
-            model_max_length=training_args.model_max_length,
-            padding_side="left",
-            use_fast=False,
-        )
+    tokenizer = transformers.AutoTokenizer.from_pretrained(
+        model_args.model_name_or_path,
+        cache_dir=training_args.cache_dir,
+        model_max_length=training_args.model_max_length,
+        padding_side="left",
+        use_fast=False,
+    )
 
     if model_args.version == "v0":
         if tokenizer.pad_token is None:
@@ -994,7 +979,7 @@ def train(attn_implementation=None):
 
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args,
-                                              voco_token=voco_token)
+                                              num_voco=training_args.num_voco)
     trainer = LLaVATrainer(model=model,
                            tokenizer=tokenizer,
                            args=training_args,

@@ -91,7 +91,7 @@ class LlavaMetaModel:
                 p.requires_grad = True
 
         if pretrain_mm_mlp_adapter is not None:
-            mm_projector_weights = torch.load(pretrain_mm_mlp_adapter, map_location='cpu')
+            mm_projector_weights = torch.load(pretrain_mm_mlp_adapter, map_location='cpu', weights_only=True)
 
             def get_w(weights, keyword):
                 return {k.split(keyword + '.')[1]: v for k, v in weights.items() if keyword in k}
@@ -239,7 +239,7 @@ class VoCoMetaForCausalLM(ABC):
             indices = (l == 32000).nonzero(as_tuple=True)[0]
             if indices.size(0) > 0:
                 # token num
-                voco_num = 2
+                voco_num = self.config.num_voco_tokens
                 assert indices.size(0) == voco_num
                 indices = l.size(0) - 1 - indices
                 voco_loc_back.append(indices.tolist())
