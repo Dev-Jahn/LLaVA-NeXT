@@ -6,7 +6,7 @@ base_command:
   - accelerate
   - launch
   - --config_file
-  - scripts/accelerate.yaml
+  - train_configs/accelerate.yaml
   - llava/train/train_voco.py
 
 training_params:
@@ -27,10 +27,13 @@ training_params:
   image_aspect_ratio: pad
   group_by_modality_length: true
   bf16: true
-  num_train_epochs: 2
+#  num_train_epochs: 2
+  max_steps: 3 #testing
   per_device_train_batch_size: 16
   per_device_eval_batch_size: 4
   gradient_accumulation_steps: 2
+  dataloader_num_workers: 16
+  dataloader_prefetch_factor: 2
   eval_strategy: "no"
   save_strategy: "steps"
   save_steps: 50000
@@ -43,5 +46,4 @@ training_params:
   tf32: true
   model_max_length: 2048
   gradient_checkpointing: true
-  dataloader_num_workers: 4
   lazy_preprocess: true

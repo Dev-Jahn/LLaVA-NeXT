@@ -6,7 +6,7 @@ base_command:
   - accelerate
   - launch
   - --config_file
-  - scripts/accelerate.yaml
+  - train_configs/accelerate.yaml
   - llava/train/train_voco_video.py
 
 training_params:
