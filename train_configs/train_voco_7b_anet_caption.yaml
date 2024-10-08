@@ -1,0 +1,63 @@
+#cuda_devices: "0,1,2,3"
+cuda_devices: "4,5,6,7"
+wandb_project: "video"
+
+base_command:
+  - accelerate
+  - launch
+  - --config_file
+  - scripts/accelerate.yaml
+  - llava/train/train_voco_video.py
+
+training_params:
+  run_name: "voco-7b-video-1token-anet_caption-lr2e5"
+  output_dir: checkpoints/voco-7b-video-1token-anet_caption-lr2e5
+  attn_implementation: sdpa
+#  max_steps: 3 #testing
+  num_train_epochs: 2
+  model_path: checkpoints/voco_llama_ckpt_0807
+  data_dir: /data/datasets/ActivityNet
+  num_voco: 2
+  conv_name: vicuna_video_caption
+  version: v0
+  dataset: activitynet-captions
+  num_frames: 32
+  frame_size: 336
+  freeze_mm_mlp_adapter: true
+  model_max_length: 2048
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 2
+  dataloader_num_workers: 16
+  dataloader_prefetch_factor: 2
+  bf16: true
+  evaluation_strategy: "no"
+#  save_strategy: "steps"
+#  save_steps: 50
+  save_strategy: "epoch"
+  save_total_limit: 10
+  learning_rate: 2e-5
+  weight_decay: 0.0
+  warmup_ratio: 0.03
+  lr_scheduler_type: "cosine"
+  logging_steps: 1
+  gradient_checkpointing: true
+#  dataloader_persistent_workers: false
+  report_to: wandb
+
+#optional_params:
+#  tf32: true
+  # num_train_epochs: 1
+  # fps: 1
+  # freeze_backbone: true
+  # tune_mm_mlp_adapter: true
+  # group_by_modality_length: true
+  # lora_enable: true
+  # lora_r: 64
+  # lora_alpha: 16
+  # lora_dropout: 0.05
+  # lora_weight_path: ""
+  # lora_bias: "none"
+  # mm_projector_lr: null
+  # pretrain_mm_mlp_adapter: checkpoints/llava-v1.5-mlp2x-336px-pretrain-vicuna-7b-v1.5/mm_projector.bin
+  # deepspeed: scripts/zero3.json
