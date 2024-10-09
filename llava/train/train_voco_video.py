@@ -6,17 +6,18 @@ import warnings
 import torch
 from torch.utils.data import DataLoader, Dataset
 import transformers
-from transformers import TrainingArguments, AutoTokenizer
+from transformers import AutoTokenizer
 
-from llava import VoCoLlamaForVideo
 from llava.constants import IGNORE_INDEX
 from llava.conversation import Conversation, conv_templates
 from llava.mm_utils import process_images, tokenizer_image_token
-from llava.train.train import safe_save_model_for_hf_trainer, get_peft_state_maybe_zero_3, \
-    get_peft_state_non_lora_maybe_zero_3
+from llava.train.train import get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3, TrainingArguments, \
+    safe_save_model_for_hf_trainer
 from llava.train.llava_trainer import LLaVATrainer
+from llava.model_voco import VoCoLlamaForVideo
 import data
 from data.utils import ParallelLoaderWrapper
+from llava.utils import rank0_print
 
 local_rank = None
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -28,7 +29,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 class ModelArguments:
     model_path: str = field()
     num_voco: int = field()
-    attn_implementation: str = field(default="sdpa")
     pretrain_mm_mlp_adapter: Optional[str] = field(default=None)
     conv_name: str = field(default="vicuna_video_caption")
     version: Optional[str] = field(default="v0")
@@ -61,7 +61,9 @@ class TrainingArguments(TrainingArguments):
     optim: str = field(default="adamw_torch")
     remove_unused_columns: bool = field(default=False)
     freeze_mm_mlp_adapter: bool = field(default=False)
-    model_max_length: int = field(default=512, metadata={"help": "Maximum seq length."})
+    model_max_length: int = field(default=2048, metadata={"help": "Maximum seq length."})
+
+    attn_implementation: str = field(default="sdpa")
 
     lora_enable: bool = False
     lora_r: int = 64
@@ -70,7 +72,9 @@ class TrainingArguments(TrainingArguments):
     lora_weight_path: str = ""
     lora_bias: str = "none"
     mm_projector_lr: Optional[float] = None
+    mm_vision_tower_lr: Optional[float] = None
     group_by_modality_length: bool = field(default=False)
+    group_by_modality_length_auto: bool = field(default=False)
 
 
 def get_dataset(data_args: DataArguments, image_processor: Callable, text_processor: Callable):
@@ -183,17 +187,18 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_path)
     model = VoCoLlamaForVideo.from_pretrained(
         model_args.model_path,
-        attn_implementation=model_args.attn_implementation,
+        attn_implementation=training_args.attn_implementation,
     )
     model.model.vision_tower.load_model()
-    # tokenizer, model, image_processor, context_len = load_pretrained_model(
-    #     model_args.model_path, None, model_name, init_vision=True,
-    #     attn_implementation=model_args.attn_implementation,
-    #     deepspeed='zero3'
-    # )
     if not hasattr(model.config, 'voco_token_id'):
         model.config.voco_token_id = tokenizer.additional_special_tokens_ids[0]
         model.config.num_voco_tokens = model_args.num_voco
+
+    model.train()
+    model.get_vision_tower().eval()
+    model.get_vision_tower().requires_grad_(False)
+    model.model.mm_projector.eval()
+    model.model.mm_projector.requires_grad_(False)
 
     # Prepare dataset
     conv = conv_templates[model_args.conv_name]
@@ -212,27 +217,30 @@ def main():
     )
 
     # Start training
-    trainer.train()
-
-    # Save the final model
-    if training_args.lora_enable:
-        state_dict = get_peft_state_maybe_zero_3(
-            model.named_parameters(), training_args.lora_bias
-        )
-        non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(
-            model.named_parameters()
-        )
-        if training_args.local_rank == 0 or training_args.local_rank == -1:
-            model.config.save_pretrained(training_args.output_dir)
-            model.save_pretrained(
-                training_args.output_dir, state_dict=state_dict)
-            torch.save(non_lora_state_dict, os.path.join(
-                training_args.output_dir, 'non_lora_trainables.bin'))
+    if training_args.resume_from_checkpoint:
+        checkpoint = os.path.join(training_args.output_dir, training_args.resume_from_checkpoint)
     else:
-        trainer.save_model(training_args.output_dir)
-        trainer.save_state()
-        # safe_save_model_for_hf_trainer(trainer=trainer,
-        #                                output_dir=training_args.output_dir)
+        checkpoint = None
+    trainer.train(resume_from_checkpoint=checkpoint)
+    trainer.save_state()
+
+    model.config.use_cache = True
+
+    if training_args.lora_enable:
+        state_dict = get_peft_state_maybe_zero_3(model.named_parameters(), training_args.lora_bias)
+        non_lora_state_dict = get_peft_state_non_lora_maybe_zero_3(model.named_parameters())
+        if training_args.local_rank == 0 or training_args.local_rank == -1:
+            if hasattr(model, "config"):
+                model.config.save_pretrained(training_args.output_dir)
+            if hasattr(model, "generation_config"):
+                model.generation_config.save_pretrained(training_args.output_dir)
+            model.save_pretrained(training_args.output_dir, state_dict=state_dict)
+            torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, "non_lora_trainables.bin"))
+    else:
+        safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
+
+    rank0_print(f"Model saved to {training_args.output_dir}")
+
 
 
 if __name__ == "__main__":

@@ -35,7 +35,8 @@ from torch.utils.data import Dataset
 from llava.conversation import Conversation
 from llava.train.llava_trainer import LLaVATrainer
 
-from llava import conversation as conversation_lib, VoCoLlamaForCausalLM
+from llava import conversation as conversation_lib
+from llava.model_voco import VoCoLlamaForCausalLM
 from llava.mm_utils import tokenizer_image_token
 
 from PIL import Image
@@ -116,6 +117,7 @@ class TrainingArguments(transformers.TrainingArguments):
     lora_bias: str = "none"
     mm_projector_lr: Optional[float] = None
     group_by_modality_length: bool = field(default=False)
+    mm_vision_tower_lr: Optional[float] = None
 
 
 def maybe_zero_3(param, ignore_status=False, name=None):
@@ -442,7 +444,7 @@ def preprocess_v1(
             assert role == conv.roles[j % 2], f"{i}"
             conv.append_message(role, sentence["value"])
         conversations.append(conv.get_prompt())
-        # The assistant gives helpful, detailed, and polite answers to the user's questions. 
+        # The assistant gives helpful, detailed, and polite answers to the user's questions.
         # + <image> + USER: Q + ASSITENT: A + ...
 
     # Tokenize conversations

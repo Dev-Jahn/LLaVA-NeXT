@@ -1,5 +1,6 @@
-#cuda_devices: "0,1,2,3"
-cuda_devices: "4,5,6,7"
+#cuda_devices: "0,1,2,3" # batch size 16
+#cuda_devices: "4,5,6,7"
+cuda_devices: "0,1,2,3,4,5,6,7" # batch size 8
 wandb_project: "video"
 
 base_command:
@@ -7,15 +8,18 @@ base_command:
   - launch
   - --config_file
   - train_configs/accelerate.yaml
+  - --num_processes
+  - "8"
   - llava/train/train_voco_video.py
 
 training_params:
   run_name: "voco-7b-video-1token-anet_caption-lr2e5"
   output_dir: checkpoints/voco-7b-video-1token-anet_caption-lr2e5
+  #  model_path: checkpoints/voco_llama_ckpt_0807
+  model_path: checkpoints/voco-7b-finetune-1token
   attn_implementation: sdpa
 #  max_steps: 3 #testing
   num_train_epochs: 2
-  model_path: checkpoints/voco_llama_ckpt_0807
   data_dir: /data/datasets/ActivityNet
   num_voco: 2
   conv_name: vicuna_video_caption
@@ -25,17 +29,18 @@ training_params:
   frame_size: 336
   freeze_mm_mlp_adapter: true
   model_max_length: 2048
-  per_device_train_batch_size: 16
+  per_device_train_batch_size: 8
   per_device_eval_batch_size: 4
   gradient_accumulation_steps: 2
   dataloader_num_workers: 16
-  dataloader_prefetch_factor: 2
+  dataloader_prefetch_factor: 1
   bf16: true
   evaluation_strategy: "no"
-#  save_strategy: "steps"
-#  save_steps: 50
-  save_strategy: "epoch"
-  save_total_limit: 10
+  resume_from_checkpoint: "checkpoint-22"
+  save_strategy: "steps"
+  save_steps: 292
+#  save_strategy: "epoch"
+  save_total_limit: 5
   learning_rate: 2e-5
   weight_decay: 0.0
   warmup_ratio: 0.03
@@ -45,12 +50,12 @@ training_params:
 #  dataloader_persistent_workers: false
   report_to: wandb
 
-#optional_params:
+optional_params:
 #  tf32: true
   # num_train_epochs: 1
   # fps: 1
   # freeze_backbone: true
-  # tune_mm_mlp_adapter: true
+  tune_mm_mlp_adapter: false
   # group_by_modality_length: true
   # lora_enable: true
   # lora_r: 64

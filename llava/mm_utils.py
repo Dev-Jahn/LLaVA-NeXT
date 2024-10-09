@@ -4,6 +4,7 @@ import base64
 import math
 import ast
 import re
+import numpy as np
 import torch
 from transformers import StoppingCriteria
 from llava.constants import IMAGE_TOKEN_INDEX
@@ -298,6 +299,8 @@ def load_image_from_base64(image):
 
 
 def expand2square(pil_img, background_color):
+    if isinstance(pil_img, np.ndarray):
+        pil_img = Image.fromarray(pil_img)
     width, height = pil_img.size
     if width == height:
         return pil_img

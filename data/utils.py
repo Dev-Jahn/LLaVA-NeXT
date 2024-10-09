@@ -19,11 +19,6 @@ class ParallelLoaderWrapper:
         else:
             raise TypeError('Unsupported loader type')
 
-        # copy attributes
-        for attr_name in dir(loader_like):
-            if not attr_name.startswith('__'):
-                setattr(self, attr_name, getattr(loader_like, attr_name))
-
         # Disable batching and intercept data collation
         # Reassigning some attributes to cancel DataLoader initialization
         self.loader._DataLoader__initialized = False
@@ -41,6 +36,13 @@ class ParallelLoaderWrapper:
         self.collate_fn = getattr(self.loader, 'collate_fn')
         self.loader.collate_fn = lambda x: x
         self.loader._DataLoader__initialized = True
+
+    def __getattr__(self, item):
+        """redirect attributes"""
+        if item == 'loader':
+            return self.loader
+        else:
+            return getattr(self.loader, item)
 
     def __iter__(self):
         batch = []

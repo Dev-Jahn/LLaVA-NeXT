@@ -262,7 +262,7 @@ class Conversation:
                     else:
                         msg = re.sub(r"(<image>)\n(?=<image>)", r"\1 ", msg)
 
-                    img_str_list = []                         
+                    img_str_list = []
                     for img in image:
                         if self.is_image_file(img):
                             img_b64_str = self.process_image(img, "Default", return_pil=False, image_format="JPEG")
@@ -347,6 +347,54 @@ conv_vicuna_v1 = Conversation(
     roles=("USER", "ASSISTANT"),
     version="v1",
     messages=[],
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+voco_conv_vicuna_v1 = Conversation(
+    system="A chat between a curious user and an artificial intelligence assistant of the image. "
+           "The assistant gives helpful, detailed, and polite answers to the user's questions.",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+
+voco_stg2_vid1_conv_vicuna_v1 = Conversation(
+    system="A chat between a curious user and an artificial intelligence assistant of the video. "
+           "The assistant carefully watch the video and pay attention to the cause and sequence of events, the detail and movement of objects, and the action and pose of persons. Based on his observations, give the answer that best addresses the question.\n",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+
+voco_stg2_vid2_conv_vicuna_v1 = Conversation(
+    system="A chat between a curious user and an artificial intelligence assistant of the video. "
+           "The assistant gives helpful, detailed, and polite answers to the user's questions. "
+           "The assistant carefully watch the video and pay attention to the cause and sequence of events, the detail and movement of objects, and the action and pose of persons. Based on the observations, give the answer that best addresses the question.",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=(),
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+
+voco_stg2_conv_vicuna_v1 = Conversation(
+    system="A chat between a curious user and an artificial intelligence assistant of the video. "
+           "The assistant gives helpful, detailed, and polite answers to the user's questions.",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=(),
     offset=0,
     sep_style=SeparatorStyle.TWO,
     sep=" ",
@@ -551,6 +599,30 @@ Answer the questions.""",
     sep="<|im_end|>",
 )
 
+custom_vicuna_video_caption = Conversation(
+    system="You are a video language assistant. " "Precisely analyze sequences of consecutive frames and follow the user\'s instruction.",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=[
+        ("USER", "Describe the main visual content or key elements you observe in the video clip in a single sentence."),
+    ],
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+
+custom_vicuna_video_qa = Conversation(
+    system="You are a video language assistant. " "Precisely analyze sequences of consecutive frames and answer to the following question.",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=[],
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+
 default_conversation = conv_vicuna_v0
 conv_templates = {
     "default": conv_vicuna_v0,
@@ -578,6 +650,8 @@ conv_templates = {
     "qwen_1_5": conv_qwen,
     "qwen_2": conv_qwen,
     "gemma_instruct": conv_gemma_instruct,
+    "vicuna_video_caption": custom_vicuna_video_caption,
+    "vicuna_video_qa": custom_vicuna_video_qa,
 }
 
 
