@@ -336,7 +336,7 @@ class VoCoMetaForCausalLM(ABC):
         if _attention_mask is None:
             attention_mask = None
         else:
-            attention_mask = attention_mask.to(dtype=_attention_mask.dtype)
+            attention_mask = attention_mask.to(dtype=torch.bool)
 
         if _position_ids is None:
             position_ids = None
@@ -472,6 +472,7 @@ class VoCoMetaForVideo(VoCoMetaForCausalLM):
             labels,
             videos,
     ):
+        # Do nothing when cached generation
         if self.get_vision_tower() is None or videos is None or (
                 isinstance(input_ids, torch.Tensor) and input_ids.shape[1] == 1):
             return input_ids, position_ids, attention_mask, past_key_values, None, labels, None

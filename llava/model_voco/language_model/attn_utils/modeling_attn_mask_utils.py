@@ -62,12 +62,12 @@ class AttentionMaskConverter:
             )
 
     def to_causal_4d(
-            self,
-            batch_size: int,
-            query_length: int,
-            key_value_length: int,
-            dtype: torch.dtype,
-            device: Union[torch.device, "str"] = "cpu",
+        self,
+        batch_size: int,
+        query_length: int,
+        key_value_length: int,
+        dtype: torch.dtype,
+        device: Union[torch.device, "str"] = "cpu",
     ) -> Optional[torch.Tensor]:
         """
         Creates a causal 4D mask of (bsz, head_dim=1, query_length, key_value_length) shape and adds large negative
@@ -95,11 +95,11 @@ class AttentionMaskConverter:
         return causal_4d_mask
 
     def to_4d(
-            self,
-            attention_mask_2d: torch.Tensor,
-            query_length: int,
-            dtype: torch.dtype,
-            key_value_length: Optional[int] = None,
+        self,
+        attention_mask_2d: torch.Tensor,
+        query_length: int,
+        dtype: torch.dtype,
+        key_value_length: Optional[int] = None,
     ) -> torch.Tensor:
         """
         Converts 2D attention mask to 4D attention mask by expanding mask to (bsz, head_dim=1, query_length,
@@ -143,11 +143,11 @@ class AttentionMaskConverter:
 
     @staticmethod
     def _make_causal_mask(
-            input_ids_shape: torch.Size,
-            dtype: torch.dtype,
-            device: torch.device,
-            past_key_values_length: int = 0,
-            sliding_window: Optional[int] = None,
+        input_ids_shape: torch.Size,
+        dtype: torch.dtype,
+        device: torch.device,
+        past_key_values_length: int = 0,
+        sliding_window: Optional[int] = None,
     ):
         """
         Make causal mask used for bi-directional self-attention.
@@ -187,7 +187,7 @@ class AttentionMaskConverter:
 
     @staticmethod
     def _unmask_unattended(
-            expanded_mask: torch.Tensor, attention_mask: torch.Tensor, unmasked_value: Union[bool, float]
+        expanded_mask: torch.Tensor, attention_mask: torch.Tensor, unmasked_value: Union[bool, float]
     ):
         # fmt: off
         """
@@ -276,11 +276,11 @@ class AttentionMaskConverter:
 
 
 def _prepare_4d_causal_attention_mask(
-        attention_mask: Optional[torch.Tensor],
-        input_shape: Union[torch.Size, Tuple, List],
-        inputs_embeds: torch.Tensor,
-        past_key_values_length: int,
-        sliding_window: Optional[int] = None,
+    attention_mask: Optional[torch.Tensor],
+    input_shape: Union[torch.Size, Tuple, List],
+    inputs_embeds: torch.Tensor,
+    past_key_values_length: int,
+    sliding_window: Optional[int] = None,
 ):
     """
     Creates a causal 4D mask of shape `(batch_size, 1, query_length, key_value_length)` from a 2D mask of shape
@@ -329,11 +329,11 @@ def _prepare_4d_causal_attention_mask(
 
 # Adapted from _prepare_4d_causal_attention_mask
 def _prepare_4d_causal_attention_mask_for_sdpa(
-        attention_mask: Optional[torch.Tensor],
-        input_shape: Union[torch.Size, Tuple, List],
-        inputs_embeds: torch.Tensor,
-        past_key_values_length: int,
-        sliding_window: Optional[int] = None,
+    attention_mask: Optional[torch.Tensor],
+    input_shape: Union[torch.Size, Tuple, List],
+    inputs_embeds: torch.Tensor,
+    past_key_values_length: int,
+    sliding_window: Optional[int] = None,
 ):
     """
     Prepares the correct `attn_mask` argument to be used by `torch.nn.functional.scaled_dot_product_attention`.
@@ -472,11 +472,11 @@ def _prepare_4d_attention_mask_for_sdpa(mask: torch.Tensor, dtype: torch.dtype, 
 
 
 def _create_4d_causal_attention_mask(
-        input_shape: Union[torch.Size, Tuple, List],
-        dtype: torch.dtype,
-        device: torch.device,
-        past_key_values_length: int = 0,
-        sliding_window: Optional[int] = None,
+    input_shape: Union[torch.Size, Tuple, List],
+    dtype: torch.dtype,
+    device: torch.device,
+    past_key_values_length: int = 0,
+    sliding_window: Optional[int] = None,
 ) -> Optional[torch.Tensor]:
     """
     Creates a causal 4D mask of shape `(batch_size, 1, query_length, key_value_length)`

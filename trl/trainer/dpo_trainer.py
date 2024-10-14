@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import inspect
 import random
 import warnings
 from collections import defaultdict
@@ -25,8 +24,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from accelerate import PartialState
-from accelerate.utils import is_deepspeed_available, tqdm
+from accelerate.utils import tqdm
+
 from datasets import Dataset
 from torch.utils.data import DataLoader
 from transformers import (
@@ -39,29 +38,15 @@ from transformers import (
 )
 from transformers.trainer_callback import TrainerCallback
 from transformers.trainer_utils import EvalLoopOutput
+import wandb
 
-from ..import_utils import is_peft_available, is_wandb_available
 from ..models import PreTrainedModelWrapper, create_reference_model
 from .utils import (
     DPODataCollatorWithPadding,
     disable_dropout_in_model,
     pad_to_length,
-    peft_module_casting_to_bf16,
     trl_sanitze_kwargs_for_tagging,
 )
-
-
-if is_peft_available():
-    from peft import PeftModel, get_peft_model, prepare_model_for_kbit_training
-
-
-if is_wandb_available():
-    import wandb
-
-if is_deepspeed_available():
-    import deepspeed
-
-from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
 
 
 class DPOTrainer(Trainer):
@@ -178,6 +163,7 @@ class DPOTrainer(Trainer):
         ref_adapter_name: Optional[str] = None,
         reference_free: bool = False,
     ):
+        from ..import_utils import is_peft_available, is_wandb_available
         # import pdb;pdb.set_trace()
         if model_init_kwargs is None:
             model_init_kwargs = {}
@@ -187,14 +173,17 @@ class DPOTrainer(Trainer):
         if ref_model_init_kwargs is None:
             ref_model_init_kwargs = {}
         elif not isinstance(ref_model, str):
-            raise ValueError("You passed ref_model_kwargs to the DPOTrainer. But your ref_model is already instantiated.")
+            raise ValueError(
+                "You passed ref_model_kwargs to the DPOTrainer. But your ref_model is already instantiated.")
 
         if isinstance(model, str):
-            warnings.warn("You passed a model_id to the DPOTrainer. This will automatically create an " "`AutoModelForCausalLM` or a `PeftModel` (if you passed a `peft_config`) for you.")
+            warnings.warn(
+                "You passed a model_id to the DPOTrainer. This will automatically create an " "`AutoModelForCausalLM` or a `PeftModel` (if you passed a `peft_config`) for you.")
             model = AutoModelForCausalLM.from_pretrained(model, **model_init_kwargs)
 
         if isinstance(ref_model, str):
-            warnings.warn("You passed a ref model_id to the DPOTrainer. This will automatically create an " "`AutoModelForCausalLM`")
+            warnings.warn(
+                "You passed a ref model_id to the DPOTrainer. This will automatically create an " "`AutoModelForCausalLM`")
             ref_model = AutoModelForCausalLM.from_pretrained(ref_model, **ref_model_init_kwargs)
 
         # Initialize this variable to False. This helps tracking the case when `peft_module_casting_to_bf16`
@@ -202,7 +191,8 @@ class DPOTrainer(Trainer):
         self._peft_has_been_casted_to_bf16 = False
 
         if generate_during_eval and not is_wandb_available():
-            raise ValueError("`generate_during_eval=True` requires Weights and Biases to be installed." " Please install `wandb` to resolve.")
+            raise ValueError(
+                "`generate_during_eval=True` requires Weights and Biases to be installed." " Please install `wandb` to resolve.")
 
         if model is not None:
             self.is_encoder_decoder = model.config.is_encoder_decoder
@@ -210,8 +200,11 @@ class DPOTrainer(Trainer):
             raise ValueError("When no model is provided, you need to pass the parameter is_encoder_decoder.")
         else:
             self.is_encoder_decoder = is_encoder_decoder
-
-        self.is_peft_model = is_peft_available() and isinstance(model, PeftModel)
+        if is_peft_available():
+            from peft import PeftModel
+            self.is_peft_model = is_peft_available() and isinstance(model, PeftModel)
+        else:
+            self.is_peft_model = False
         self.model_adapter_name = model_adapter_name
         self.ref_adapter_name = ref_adapter_name
         self.reference_free = reference_free
@@ -222,6 +215,7 @@ class DPOTrainer(Trainer):
             # The `model` with adapters turned off will be used as the reference model
             self.ref_model = None
         else:
+            from transformers.integrations.deepspeed import is_deepspeed_zero3_enabled
             if is_deepspeed_zero3_enabled():
                 self.ref_model = AutoModelForCausalLM.from_pretrained(model)
             else:
@@ -289,7 +283,8 @@ class DPOTrainer(Trainer):
         self._precomputed_eval_ref_log_probs = False
 
         if loss_type in ["hinge", "ipo", "kto_pair"] and label_smoothing > 0:
-            warnings.warn("You are using a loss type that does not support label smoothing. Ignoring label_smoothing parameter.")
+            warnings.warn(
+                "You are using a loss type that does not support label smoothing. Ignoring label_smoothing parameter.")
 
         self.dpo_alpha = dpo_alpha
         self.beta = beta
@@ -324,16 +319,19 @@ class DPOTrainer(Trainer):
         )
 
         if not hasattr(self, "accelerator"):
-            raise AttributeError("Your `Trainer` does not have an `accelerator` object. Consider upgrading `transformers`.")
+            raise AttributeError(
+                "Your `Trainer` does not have an `accelerator` object. Consider upgrading `transformers`.")
 
         # Deepspeed Zero-3 does not support precompute_ref_log_probs
         if self.is_deepspeed_enabled:
             if self.accelerator.state.deepspeed_plugin.zero_stage == 3 and self.precompute_ref_log_probs:
-                raise ValueError("You cannot use `precompute_ref_log_probs=True` with Deepspeed ZeRO-3. Please set `precompute_ref_log_probs=False`.")
+                raise ValueError(
+                    "You cannot use `precompute_ref_log_probs=True` with Deepspeed ZeRO-3. Please set `precompute_ref_log_probs=False`.")
 
         if self.ref_model is None:
             if not (self.is_peft_model or self.precompute_ref_log_probs):
-                raise ValueError("No reference model and model is not a Peft model. Try setting `precompute_ref_log_probs=True`")
+                raise ValueError(
+                    "No reference model and model is not a Peft model. Try setting `precompute_ref_log_probs=True`")
         else:
             if self.is_deepspeed_enabled:
                 self.ref_model = self._prepare_deepspeed(self.ref_model)
@@ -341,13 +339,16 @@ class DPOTrainer(Trainer):
                 self.ref_model = self.accelerator.prepare_model(self.ref_model, evaluation_mode=True)
 
     def _prepare_deepspeed(self, model: PreTrainedModelWrapper):
+        import deepspeed
         # Adapted from accelerate: https://github.com/huggingface/accelerate/blob/739b135f8367becb67ffaada12fe76e3aa60fefd/src/accelerate/accelerator.py#L1473
         deepspeed_plugin = self.accelerator.state.deepspeed_plugin
         config_kwargs = deepcopy(deepspeed_plugin.deepspeed_config)
 
         if model is not None:
             if hasattr(model, "config"):
-                hidden_size = max(model.config.hidden_sizes) if getattr(model.config, "hidden_sizes", None) else getattr(model.config, "hidden_size", None)
+                hidden_size = max(model.config.hidden_sizes) if getattr(model.config, "hidden_sizes",
+                                                                        None) else getattr(model.config, "hidden_size",
+                                                                                           None)
                 if hidden_size is not None and config_kwargs["zero_optimization"]["stage"] == 3:
                     # Note that `stage3_prefetch_bucket_size` can produce DeepSpeed messages like: `Invalidate trace cache @ step 0: expected module 1, but got module 0`
                     # This is expected and is not an error, see: https://github.com/microsoft/DeepSpeed/discussions/4081
@@ -390,15 +391,18 @@ class DPOTrainer(Trainer):
             reference_rejected_logps = []
             for padded_batch in tqdm(iterable=data_loader, desc="Train dataset reference log probs"):
                 reference_chosen_logp, reference_rejected_logp = self.compute_reference_log_probs(padded_batch)
-                reference_chosen_logp, reference_rejected_logp = self.accelerator.gather_for_metrics((reference_chosen_logp, reference_rejected_logp))
+                reference_chosen_logp, reference_rejected_logp = self.accelerator.gather_for_metrics(
+                    (reference_chosen_logp, reference_rejected_logp))
                 reference_chosen_logps.append(reference_chosen_logp.cpu())
                 reference_rejected_logps.append(reference_rejected_logp.cpu())
 
             all_reference_chosen_logps = torch.cat(reference_chosen_logps).float().numpy()
             all_reference_rejected_logps = torch.cat(reference_rejected_logps).float().numpy()
 
-            self.train_dataset = self.train_dataset.add_column(name="reference_chosen_logps", column=all_reference_chosen_logps)
-            self.train_dataset = self.train_dataset.add_column(name="reference_rejected_logps", column=all_reference_rejected_logps)
+            self.train_dataset = self.train_dataset.add_column(name="reference_chosen_logps",
+                                                               column=all_reference_chosen_logps)
+            self.train_dataset = self.train_dataset.add_column(name="reference_rejected_logps",
+                                                               column=all_reference_rejected_logps)
 
             self._precomputed_train_ref_log_probs = True
 
@@ -435,7 +439,8 @@ class DPOTrainer(Trainer):
             reference_rejected_logps = []
             for padded_batch in tqdm(iterable=data_loader, desc="Eval dataset reference log probs"):
                 reference_chosen_logp, reference_rejected_logp = self.compute_reference_log_probs(padded_batch)
-                reference_chosen_logp, reference_rejected_logp = self.accelerator.gather_for_metrics((reference_chosen_logp, reference_rejected_logp))
+                reference_chosen_logp, reference_rejected_logp = self.accelerator.gather_for_metrics(
+                    (reference_chosen_logp, reference_rejected_logp))
                 reference_chosen_logps.append(reference_chosen_logp.cpu())
                 reference_rejected_logps.append(reference_rejected_logp.cpu())
 
@@ -463,8 +468,8 @@ class DPOTrainer(Trainer):
         full_tokenized = self.tokenizer(prompt + answer, add_special_tokens=False)
         prompt_input_ids = self.tokenizer(prompt, add_special_tokens=False)["input_ids"]
 
-        answer_input_ids = full_tokenized["input_ids"][len(prompt_input_ids) :]
-        answer_attention_mask = full_tokenized["attention_mask"][len(prompt_input_ids) :]
+        answer_input_ids = full_tokenized["input_ids"][len(prompt_input_ids):]
+        answer_attention_mask = full_tokenized["attention_mask"][len(prompt_input_ids):]
 
         # Concat tokens to form `enc(a) + enc(a + b)[len(enc(a)):]`
         full_concat_input_ids = np.concatenate([prompt_input_ids, answer_input_ids])
@@ -550,10 +555,12 @@ class DPOTrainer(Trainer):
 
             # Make sure prompts only have one different token at most an
             # and length only differs by 1 at most
-            num_diff_tokens = sum([a != b for a, b in zip(chosen_tokens["prompt_input_ids"], rejected_tokens["prompt_input_ids"])])
+            num_diff_tokens = sum(
+                [a != b for a, b in zip(chosen_tokens["prompt_input_ids"], rejected_tokens["prompt_input_ids"])])
             num_diff_len = abs(chosen_prompt_len_input_ids - rejected_prompt_len_input_ids)
             if num_diff_tokens > 1 or num_diff_len > 1:
-                raise ValueError("Chosen and rejected prompt_input_ids might only differ on the " "last token due to tokenizer merge ops.")
+                raise ValueError(
+                    "Chosen and rejected prompt_input_ids might only differ on the " "last token due to tokenizer merge ops.")
 
             # add BOS token to head of prompt
             prompt_tokens["prompt_input_ids"] = [self.tokenizer.bos_token_id] + prompt_tokens["prompt_input_ids"]
@@ -581,7 +588,7 @@ class DPOTrainer(Trainer):
                             answer_tokens[k] = answer_tokens[k][: self.max_prompt_length]
                     elif self.truncation_mode == "keep_end":
                         for k in ["prompt_input_ids", "prompt_attention_mask"]:
-                            answer_tokens[k] = answer_tokens[k][-self.max_prompt_length :]
+                            answer_tokens[k] = answer_tokens[k][-self.max_prompt_length:]
                     else:
                         raise ValueError(f"Unknown truncation mode: {self.truncation_mode}")
 
@@ -592,12 +599,18 @@ class DPOTrainer(Trainer):
                         answer_tokens[k] = answer_tokens[k][: self.max_length - self.max_prompt_length]
 
             # Create labels
-            chosen_sequence_tokens = {k: chosen_tokens[f"prompt_{k}"] + chosen_tokens[k] for k in ["input_ids", "attention_mask"]}
-            rejected_sequence_tokens = {k: rejected_tokens[f"prompt_{k}"] + rejected_tokens[k] for k in ["input_ids", "attention_mask"]}
+            chosen_sequence_tokens = {k: chosen_tokens[f"prompt_{k}"] + chosen_tokens[k] for k in
+                                      ["input_ids", "attention_mask"]}
+            rejected_sequence_tokens = {k: rejected_tokens[f"prompt_{k}"] + rejected_tokens[k] for k in
+                                        ["input_ids", "attention_mask"]}
             chosen_sequence_tokens["labels"] = chosen_sequence_tokens["input_ids"][:]
-            chosen_sequence_tokens["labels"][: len(chosen_tokens["prompt_input_ids"])] = [self.label_pad_token_id] * len(chosen_tokens["prompt_input_ids"])
+            chosen_sequence_tokens["labels"][: len(chosen_tokens["prompt_input_ids"])] = [
+                                                                                             self.label_pad_token_id] * len(
+                chosen_tokens["prompt_input_ids"])
             rejected_sequence_tokens["labels"] = rejected_sequence_tokens["input_ids"][:]
-            rejected_sequence_tokens["labels"][: len(rejected_tokens["prompt_input_ids"])] = [self.label_pad_token_id] * len(rejected_tokens["prompt_input_ids"])
+            rejected_sequence_tokens["labels"][: len(rejected_tokens["prompt_input_ids"])] = [
+                                                                                                 self.label_pad_token_id] * len(
+                rejected_tokens["prompt_input_ids"])
 
             for k, toks in {
                 "chosen_": chosen_sequence_tokens,
@@ -610,9 +623,12 @@ class DPOTrainer(Trainer):
                     batch[f"{k}{type_key}"] = tokens
 
         else:
-            chosen_tokens = self.tokenizer(chosen, truncation=True, max_length=self.max_target_length, add_special_tokens=True)
-            rejected_tokens = self.tokenizer(rejected, truncation=True, max_length=self.max_target_length, add_special_tokens=True)
-            prompt_tokens = self.tokenizer(prompt, truncation=True, max_length=self.max_prompt_length, add_special_tokens=True)
+            chosen_tokens = self.tokenizer(chosen, truncation=True, max_length=self.max_target_length,
+                                           add_special_tokens=True)
+            rejected_tokens = self.tokenizer(rejected, truncation=True, max_length=self.max_target_length,
+                                             add_special_tokens=True)
+            prompt_tokens = self.tokenizer(prompt, truncation=True, max_length=self.max_prompt_length,
+                                           add_special_tokens=True)
 
             batch["chosen_labels"] = chosen_tokens["input_ids"]
             batch["rejected_labels"] = rejected_tokens["input_ids"]
@@ -620,15 +636,18 @@ class DPOTrainer(Trainer):
             batch["prompt_attention_mask"] = prompt_tokens["attention_mask"]
 
             if model is not None and hasattr(model, "prepare_decoder_input_ids_from_labels"):
-                batch["rejected_decoder_input_ids"] = model.prepare_decoder_input_ids_from_labels(labels=batch["rejected_labels"])
-                batch["chosen_decoder_input_ids"] = model.prepare_decoder_input_ids_from_labels(labels=batch["chosen_labels"])
+                batch["rejected_decoder_input_ids"] = model.prepare_decoder_input_ids_from_labels(
+                    labels=batch["rejected_labels"])
+                batch["chosen_decoder_input_ids"] = model.prepare_decoder_input_ids_from_labels(
+                    labels=batch["chosen_labels"])
 
         return batch
 
     @contextmanager
     def null_ref_context(self):
         """Context manager for handling null reference model (that is, peft adapter manipulation)."""
-        with self.accelerator.unwrap_model(self.model).disable_adapter() if self.is_peft_model and not self.ref_adapter_name else nullcontext():
+        with self.accelerator.unwrap_model(
+            self.model).disable_adapter() if self.is_peft_model and not self.ref_adapter_name else nullcontext():
             if self.ref_adapter_name:
                 self.model.set_adapter(self.ref_adapter_name)
             yield
@@ -716,7 +735,8 @@ class DPOTrainer(Trainer):
 
         if is_encoder_decoder:
             concatenated_batch["concatenated_input_ids"] = batch["prompt_input_ids"].repeat(2, 1).to(device=device)
-            concatenated_batch["concatenated_attention_mask"] = batch["prompt_attention_mask"].repeat(2, 1).to(device=device)
+            concatenated_batch["concatenated_attention_mask"] = batch["prompt_attention_mask"].repeat(2, 1).to(
+                device=device)
         # import pdb; pdb.set_trace()
         # repeated_list = [
         #     batch['images'][0] * 2,
@@ -763,7 +783,8 @@ class DPOTrainer(Trainer):
         # We ignore the reference model as beta -> 0. The label_smoothing parameter encodes our uncertainty about the labels and
         # calculates a conservative DPO loss.
         if self.loss_type == "sigmoid":
-            losses = -F.logsigmoid(self.beta * logits) * (1 - self.label_smoothing) - F.logsigmoid(-self.beta * logits) * self.label_smoothing
+            losses = -F.logsigmoid(self.beta * logits) * (1 - self.label_smoothing) - F.logsigmoid(
+                -self.beta * logits) * self.label_smoothing
         elif self.loss_type == "hinge":
             losses = torch.relu(1 - self.beta * logits)
         elif self.loss_type == "ipo":
@@ -785,10 +806,13 @@ class DPOTrainer(Trainer):
                 0,
             )
         else:
-            raise ValueError(f"Unknown loss type: {self.loss_type}. Should be one of ['sigmoid', 'hinge', 'ipo', 'kto_pair']")
+            raise ValueError(
+                f"Unknown loss type: {self.loss_type}. Should be one of ['sigmoid', 'hinge', 'ipo', 'kto_pair']")
 
-        chosen_rewards = self.beta * (policy_chosen_logps.to(self.accelerator.device) - reference_chosen_logps.to(self.accelerator.device)).detach()
-        rejected_rewards = self.beta * (policy_rejected_logps.to(self.accelerator.device) - reference_rejected_logps.to(self.accelerator.device)).detach()
+        chosen_rewards = self.beta * (policy_chosen_logps.to(self.accelerator.device) - reference_chosen_logps.to(
+            self.accelerator.device)).detach()
+        rejected_rewards = self.beta * (policy_rejected_logps.to(self.accelerator.device) - reference_rejected_logps.to(
+            self.accelerator.device)).detach()
 
         return losses, chosen_rewards, rejected_rewards
 
@@ -843,7 +867,8 @@ class DPOTrainer(Trainer):
         loss = loss_fct(shift_logits, shift_labels)
         return loss
 
-    def concatenated_forward(self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]]) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+    def concatenated_forward(self, model: nn.Module, batch: Dict[str, Union[List, torch.LongTensor]]) -> Tuple[
+        torch.FloatTensor, torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
         """Run the given model on the given batch of inputs, concatenating the chosen and rejected inputs together.
 
         We do this to avoid doing two forward passes, because it's faster for FSDP.
@@ -1148,14 +1173,16 @@ class DPOTrainer(Trainer):
                 {
                     "game_log": wandb.Table(
                         columns=["Prompt", "Policy", "Ref Model"],
-                        rows=[[prompt, pol[len(prompt) :], ref[len(prompt) :]] for prompt, pol, ref in zip(random_batch["prompt"], policy_output_decoded, ref_output_decoded)],
+                        rows=[[prompt, pol[len(prompt):], ref[len(prompt):]] for prompt, pol, ref in
+                              zip(random_batch["prompt"], policy_output_decoded, ref_output_decoded)],
                     )
                 }
             )
             self.state.log_history.pop()
 
         # Base evaluation
-        initial_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys, metric_key_prefix)
+        initial_output = super().evaluation_loop(dataloader, description, prediction_loss_only, ignore_keys,
+                                                 metric_key_prefix)
 
         return initial_output
 

@@ -5,13 +5,12 @@ import warnings
 
 import torch
 import transformers
-from transformers import TrainingArguments, Trainer, AutoTokenizer
+from transformers import TrainingArguments, AutoTokenizer
 
-from llava import VoCoLlamaForVideo
+from llava import VoCoLlamaForVideo, data
 from llava.constants import IGNORE_INDEX
 from llava.conversation import Conversation, conv_templates
 from llava.mm_utils import process_images, tokenizer_image_token
-import data
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)

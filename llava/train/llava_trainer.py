@@ -1,29 +1,17 @@
 import os
 import torch
 import torch.nn as nn
-import datetime
 
-from accelerate import Accelerator
-from accelerate.utils import InitProcessGroupKwargs, GradientAccumulationPlugin
 from torch.utils.data import Dataset, Sampler, DataLoader
 
 from trl.trainer import DPOTrainer
-from trl.trainer.utils import DPODataCollatorWithPadding
-
 from transformers import Trainer
-from transformers.trainer import is_sagemaker_mp_enabled, get_parameter_names, has_length, ALL_LAYERNORM_LAYERS, logger, is_accelerate_available, is_datasets_available, GradientAccumulationPlugin
+from transformers.trainer import is_sagemaker_mp_enabled, get_parameter_names, has_length, ALL_LAYERNORM_LAYERS, logger, \
+    is_accelerate_available, is_datasets_available, GradientAccumulationPlugin
 from transformers.trainer_utils import seed_worker
 from transformers.trainer_pt_utils import get_length_grouped_indices as get_length_grouped_indices_hf
-from transformers.trainer_pt_utils import AcceleratorConfig
 from typing import List, Optional
 from datetime import timedelta
-
-if is_accelerate_available():
-    from accelerate import Accelerator, skip_first_batches, InitProcessGroupKwargs
-
-if is_datasets_available():
-    import datasets
-
 from llava.utils import rank0_print
 
 
@@ -75,11 +63,11 @@ def get_variable_length_grouped_indices(lengths, batch_size, world_size, megabat
     indices = torch.randperm(len(lengths), generator=generator)
     sorted_indices = sorted(range(len(lengths)), key=lambda i: lengths[i], reverse=True)
     megabatch_size = world_size * batch_size * megabatch_mult
-    megabatches = [sorted_indices[i : i + megabatch_size] for i in range(0, len(lengths), megabatch_size)]
+    megabatches = [sorted_indices[i: i + megabatch_size] for i in range(0, len(lengths), megabatch_size)]
     megabatches = [sorted(megabatch, key=lambda i: indices[i], reverse=True) for megabatch in megabatches]
     shuffled_indices = [i for megabatch in megabatches for i in megabatch]
     world_batch_size = world_size * batch_size
-    batches = [shuffled_indices[i : i + world_batch_size] for i in range(0, len(lengths), world_batch_size)]
+    batches = [shuffled_indices[i: i + world_batch_size] for i in range(0, len(lengths), world_batch_size)]
     batch_indices = torch.randperm(len(batches), generator=generator)
     batches = [batches[i] for i in batch_indices]
 
@@ -108,10 +96,11 @@ def get_modality_length_grouped_indices(lengths, batch_size, world_size, generat
     lang_indices, lang_lengths = zip(*[(i, -l) for i, l in enumerate(lengths) if l < 0])
 
     mm_shuffle = [mm_indices[i] for i in get_length_grouped_indices(mm_lengths, batch_size, world_size, generator=None)]
-    lang_shuffle = [lang_indices[i] for i in get_length_grouped_indices(lang_lengths, batch_size, world_size, generator=None)]
+    lang_shuffle = [lang_indices[i] for i in
+                    get_length_grouped_indices(lang_lengths, batch_size, world_size, generator=None)]
     megabatch_size = world_size * batch_size
-    mm_megabatches = [mm_shuffle[i : i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
-    lang_megabatches = [lang_shuffle[i : i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
+    mm_megabatches = [mm_shuffle[i: i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
+    lang_megabatches = [lang_shuffle[i: i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
 
     last_mm = mm_megabatches[-1]
     last_lang = lang_megabatches[-1]
@@ -142,7 +131,7 @@ def get_length_grouped_indices(lengths, batch_size, world_size, generator=None, 
     # We need to use torch for the random part as a distributed sampler will set the random seed for torch.
     indices = torch.randperm(len(lengths), generator=generator)
     megabatch_size = world_size * batch_size
-    megabatches = [indices[i : i + megabatch_size].tolist() for i in range(0, len(lengths), megabatch_size)]
+    megabatches = [indices[i: i + megabatch_size].tolist() for i in range(0, len(lengths), megabatch_size)]
     megabatches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in megabatches]
     megabatches = [split_to_even_chunks(megabatch, lengths, world_size) for megabatch in megabatches]
 
@@ -153,7 +142,7 @@ def get_length_grouped_indices_auto_single(lengths, batch_size, world_size, gene
     indices = get_length_grouped_indices_hf(lengths, batch_size * world_size, generator=generator)
 
     megabatch_size = world_size * batch_size
-    megabatches = [indices[i : i + megabatch_size] for i in range(0, len(lengths), megabatch_size)]
+    megabatches = [indices[i: i + megabatch_size] for i in range(0, len(lengths), megabatch_size)]
     megabatches = [sorted(megabatch, key=lambda i: lengths[i], reverse=True) for megabatch in megabatches]
     megabatches = [split_to_even_chunks(megabatch, lengths, world_size) for megabatch in megabatches]
 
@@ -173,11 +162,13 @@ def get_modality_length_grouped_indices_auto(lengths, batch_size, world_size, ge
     mm_indices, mm_lengths = zip(*[(i, l) for i, l in enumerate(lengths) if l > 0])
     lang_indices, lang_lengths = zip(*[(i, -l) for i, l in enumerate(lengths) if l < 0])
 
-    mm_shuffle = [mm_indices[i] for i in get_length_grouped_indices_auto_single(mm_lengths, batch_size, world_size, generator=None)]
-    lang_shuffle = [lang_indices[i] for i in get_length_grouped_indices_auto_single(lang_lengths, batch_size, world_size, generator=None)]
+    mm_shuffle = [mm_indices[i] for i in
+                  get_length_grouped_indices_auto_single(mm_lengths, batch_size, world_size, generator=None)]
+    lang_shuffle = [lang_indices[i] for i in
+                    get_length_grouped_indices_auto_single(lang_lengths, batch_size, world_size, generator=None)]
     megabatch_size = world_size * batch_size
-    mm_megabatches = [mm_shuffle[i : i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
-    lang_megabatches = [lang_shuffle[i : i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
+    mm_megabatches = [mm_shuffle[i: i + megabatch_size] for i in range(0, len(mm_shuffle), megabatch_size)]
+    lang_megabatches = [lang_shuffle[i: i + megabatch_size] for i in range(0, len(lang_shuffle), megabatch_size)]
 
     last_mm = mm_megabatches[-1]
     last_lang = lang_megabatches[-1]
@@ -226,20 +217,25 @@ class LengthGroupedSampler(Sampler):
     def __iter__(self):
         if self.variable_length:
             assert not self.group_by_modality, "Variable length grouping is not supported with modality grouping."
-            indices = get_variable_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
+            indices = get_variable_length_grouped_indices(self.lengths, self.batch_size, self.world_size,
+                                                          generator=self.generator)
         else:
             if self.group_by_modality:
-                indices = get_modality_length_grouped_indices(self.lengths, self.batch_size, self.world_size, generator=self.generator)
+                indices = get_modality_length_grouped_indices(self.lengths, self.batch_size, self.world_size,
+                                                              generator=self.generator)
             elif self.group_by_modality_auto:
-                indices = get_modality_length_grouped_indices_auto(self.lengths, self.batch_size, self.world_size, generator=self.generator)
+                indices = get_modality_length_grouped_indices_auto(self.lengths, self.batch_size, self.world_size,
+                                                                   generator=self.generator)
             else:
-                indices = get_length_grouped_indices_auto_single(self.lengths, self.batch_size, self.world_size, generator=self.generator)
+                indices = get_length_grouped_indices_auto_single(self.lengths, self.batch_size, self.world_size,
+                                                                 generator=self.generator)
         return iter(indices)
 
 
 class LLaVATrainer(Trainer):
 
     def create_accelerator_and_postprocess(self):
+        from accelerate import Accelerator, InitProcessGroupKwargs
         grad_acc_kwargs = {"num_steps": self.args.gradient_accumulation_steps}
         grad_acc_kwargs["sync_with_dataloader"] = False
         gradient_accumulation_plugin = GradientAccumulationPlugin(**grad_acc_kwargs)
@@ -249,7 +245,9 @@ class LLaVATrainer(Trainer):
 
         # create accelerator object
         self.accelerator = Accelerator(
-            dispatch_batches=self.args.dispatch_batches, split_batches=self.args.split_batches, deepspeed_plugin=self.args.deepspeed_plugin, gradient_accumulation_plugin=gradient_accumulation_plugin, kwargs_handlers=[accelerator_kwargs]
+            dispatch_batches=self.args.dispatch_batches, split_batches=self.args.split_batches,
+            deepspeed_plugin=self.args.deepspeed_plugin, gradient_accumulation_plugin=gradient_accumulation_plugin,
+            kwargs_handlers=[accelerator_kwargs]
         )
         # some Trainer classes need to use `gather` instead of `gather_for_metrics`, thus we store a flag
         self.gather_function = self.accelerator.gather_for_metrics
@@ -261,11 +259,14 @@ class LLaVATrainer(Trainer):
         # post accelerator creation setup
         if self.is_fsdp_enabled:
             fsdp_plugin = self.accelerator.state.fsdp_plugin
-            fsdp_plugin.limit_all_gathers = self.args.fsdp_config.get("limit_all_gathers", fsdp_plugin.limit_all_gathers)
+            fsdp_plugin.limit_all_gathers = self.args.fsdp_config.get("limit_all_gathers",
+                                                                      fsdp_plugin.limit_all_gathers)
             if is_accelerate_available("0.23.0"):
-                fsdp_plugin.activation_checkpointing = self.args.fsdp_config.get("activation_checkpointing", fsdp_plugin.activation_checkpointing)
+                fsdp_plugin.activation_checkpointing = self.args.fsdp_config.get("activation_checkpointing",
+                                                                                 fsdp_plugin.activation_checkpointing)
                 if fsdp_plugin.activation_checkpointing and self.args.gradient_checkpointing:
-                    raise ValueError("The activation_checkpointing in FSDP config and the gradient_checkpointing in training arg " "can't be set to True simultaneously. Please use FSDP's activation_checkpointing logic " "when using FSDP.")
+                    raise ValueError(
+                        "The activation_checkpointing in FSDP config and the gradient_checkpointing in training arg " "can't be set to True simultaneously. Please use FSDP's activation_checkpointing logic " "when using FSDP.")
 
         if self.is_deepspeed_enabled and getattr(self.args, "hf_deepspeed_config", None) is None:
             self.propagate_args_to_deepspeed()
@@ -280,7 +281,8 @@ class LLaVATrainer(Trainer):
                 # self.args.train_batch_size * self.args.gradient_accumulation_steps, # TODO: seems that we should not have gradient_accumulation_steps
                 self.args.train_batch_size,
                 # world_size=self.args.world_size,
-                world_size=self.args.world_size * self.args.gradient_accumulation_steps,  # TODO: seems that this may work?
+                world_size=self.args.world_size * self.args.gradient_accumulation_steps,
+                # TODO: seems that this may work?
                 lengths=lengths,
             )
         elif self.args.group_by_modality_length:
@@ -289,7 +291,8 @@ class LLaVATrainer(Trainer):
                 # self.args.train_batch_size * self.args.gradient_accumulation_steps, # TODO: seems that we should not have gradient_accumulation_steps
                 self.args.train_batch_size,
                 # world_size=self.args.world_size,
-                world_size=self.args.world_size * self.args.gradient_accumulation_steps,  # TODO: seems that this may work?
+                world_size=self.args.world_size * self.args.gradient_accumulation_steps,
+                # TODO: seems that this may work?
                 lengths=lengths,
                 group_by_modality=True,
             )
@@ -299,7 +302,8 @@ class LLaVATrainer(Trainer):
                 # self.args.train_batch_size * self.args.gradient_accumulation_steps, # TODO: seems that we should not have gradient_accumulation_steps
                 self.args.train_batch_size,
                 # world_size=self.args.world_size,
-                world_size=self.args.world_size * self.args.gradient_accumulation_steps,  # TODO: seems that this may work?
+                world_size=self.args.world_size * self.args.gradient_accumulation_steps,
+                # TODO: seems that this may work?
                 lengths=lengths,
                 group_by_modality_auto=True,
             )
@@ -309,7 +313,8 @@ class LLaVATrainer(Trainer):
                 self.args.train_batch_size * self.args.gradient_accumulation_steps,
                 # self.args.train_batch_size, # TODO: seems that we should have gradient_accumulation_steps
                 # world_size=self.args.world_size,
-                world_size=self.args.world_size * self.args.gradient_accumulation_steps,  # TODO: seems that this may work?
+                world_size=self.args.world_size * self.args.gradient_accumulation_steps,
+                # TODO: seems that this may work?
                 lengths=lengths,
                 variable_length=True,
             )
@@ -325,6 +330,9 @@ class LLaVATrainer(Trainer):
 
         Subclass and override this method if you want to inject some custom behavior.
         """
+
+        if is_datasets_available():
+            import datasets
         if self.train_dataset is None:
             raise ValueError("Trainer: training requires a train_dataset.")
 
@@ -347,7 +355,8 @@ class LLaVATrainer(Trainer):
             dataloader_params["sampler"] = self._get_train_sampler()
             dataloader_params["drop_last"] = self.args.dataloader_drop_last
             dataloader_params["worker_init_fn"] = seed_worker
-            dataloader_params["prefetch_factor"] = self.args.dataloader_num_workers * 2 if self.args.dataloader_num_workers != 0 else None
+            dataloader_params[
+                "prefetch_factor"] = self.args.dataloader_num_workers * 2 if self.args.dataloader_num_workers != 0 else None
 
         dataloader = self.accelerator.prepare(DataLoader(train_dataset, **dataloader_params))
 
@@ -374,14 +383,17 @@ class LLaVATrainer(Trainer):
             if self.args.mm_vision_tower_lr is not None:
                 lr_mapper["vision_tower"] = self.args.mm_vision_tower_lr
             if len(lr_mapper) > 0:
-                special_lr_parameters = [name for name, _ in opt_model.named_parameters() if any(module_keyword in name for module_keyword in lr_mapper)]
+                special_lr_parameters = [name for name, _ in opt_model.named_parameters() if
+                                         any(module_keyword in name for module_keyword in lr_mapper)]
                 optimizer_grouped_parameters = [
                     {
-                        "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
+                        "params": [p for n, p in opt_model.named_parameters() if
+                                   (n in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
                         "weight_decay": self.args.weight_decay,
                     },
                     {
-                        "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
+                        "params": [p for n, p in opt_model.named_parameters() if
+                                   (n not in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
                         "weight_decay": 0.0,
                     },
                 ]
@@ -390,12 +402,14 @@ class LLaVATrainer(Trainer):
                     optimizer_grouped_parameters.extend(
                         [
                             {
-                                "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n in module_parameters and p.requires_grad)],
+                                "params": [p for n, p in opt_model.named_parameters() if
+                                           (n in decay_parameters and n in module_parameters and p.requires_grad)],
                                 "weight_decay": self.args.weight_decay,
                                 "lr": lr,
                             },
                             {
-                                "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n in module_parameters and p.requires_grad)],
+                                "params": [p for n, p in opt_model.named_parameters() if
+                                           (n not in decay_parameters and n in module_parameters and p.requires_grad)],
                                 "weight_decay": 0.0,
                                 "lr": lr,
                             },
@@ -404,11 +418,13 @@ class LLaVATrainer(Trainer):
             else:
                 optimizer_grouped_parameters = [
                     {
-                        "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and p.requires_grad)],
+                        "params": [p for n, p in opt_model.named_parameters() if
+                                   (n in decay_parameters and p.requires_grad)],
                         "weight_decay": self.args.weight_decay,
                     },
                     {
-                        "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and p.requires_grad)],
+                        "params": [p for n, p in opt_model.named_parameters() if
+                                   (n not in decay_parameters and p.requires_grad)],
                         "weight_decay": 0.0,
                     },
                 ]
@@ -425,16 +441,17 @@ class LLaVATrainer(Trainer):
                 for module in opt_model.modules():
                     if isinstance(module, nn.Embedding):
                         skipped += sum({p.data_ptr(): p.numel() for p in module.parameters()}.values())
-                        logger.info(f"skipped {module}: {skipped/2**20}M params")
+                        logger.info(f"skipped {module}: {skipped / 2 ** 20}M params")
                         manager.register_module_override(module, "weight", {"optim_bits": 32})
                         logger.debug(f"bitsandbytes: will optimize {module} in fp32")
-                logger.info(f"skipped: {skipped/2**20}M params")
+                logger.info(f"skipped: {skipped / 2 ** 20}M params")
 
         return self.optimizer
 
     def _save_checkpoint(self, model, trial, metrics=None):
         if getattr(self.args, "tune_mm_mlp_adapter", False) or (
-            hasattr(self.args, "mm_tunable_parts") and (len(self.args.mm_tunable_parts.split(",")) == 1 and ("mm_mlp_adapter" in self.args.mm_tunable_parts or "mm_vision_resampler" in self.args.mm_tunable_parts))
+            hasattr(self.args, "mm_tunable_parts") and (len(self.args.mm_tunable_parts.split(",")) == 1 and (
+            "mm_mlp_adapter" in self.args.mm_tunable_parts or "mm_vision_resampler" in self.args.mm_tunable_parts))
         ):
             from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
@@ -482,7 +499,8 @@ class LLaVADPOTrainer(DPOTrainer):
 
     def _save_checkpoint(self, model, trial, metrics=None):
         if getattr(self.args, "tune_mm_mlp_adapter", False) or (
-            hasattr(self.args, "mm_tunable_parts") and (len(self.args.mm_tunable_parts.split(",")) == 1 and ("mm_mlp_adapter" in self.args.mm_tunable_parts or "mm_vision_resampler" in self.args.mm_tunable_parts))
+            hasattr(self.args, "mm_tunable_parts") and (len(self.args.mm_tunable_parts.split(",")) == 1 and (
+            "mm_mlp_adapter" in self.args.mm_tunable_parts or "mm_vision_resampler" in self.args.mm_tunable_parts))
         ):
             from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 

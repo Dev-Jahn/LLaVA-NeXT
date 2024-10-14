@@ -15,8 +15,8 @@ from llava.train.train import get_peft_state_maybe_zero_3, get_peft_state_non_lo
     safe_save_model_for_hf_trainer
 from llava.train.llava_trainer import LLaVATrainer
 from llava.model_voco import VoCoLlamaForVideo
-import data
-from data.utils import ParallelLoaderWrapper
+from llava import data as custom_data
+from llava.data.utils import ParallelLoaderWrapper
 from llava.utils import rank0_print
 
 local_rank = None
@@ -79,7 +79,7 @@ class TrainingArguments(TrainingArguments):
 
 def get_dataset(data_args: DataArguments, image_processor: Callable, text_processor: Callable):
     if data_args.dataset == "internvid":
-        return data.InternVidDataset(
+        return custom_data.InternVidDataset(
             cache_dir=data_args.data_dir,
             fps=data_args.fps,
             max_frames=data_args.num_frames,
@@ -90,7 +90,7 @@ def get_dataset(data_args: DataArguments, image_processor: Callable, text_proces
             cookie_path=data_args.cookie_path,
         )
     elif 'activitynet' in data_args.dataset:
-        return data.ActivityNet(
+        return custom_data.ActivityNet(
             root_dir=data_args.data_dir,
             split=data_args.data_split,
             labeltype=data_args.dataset.split('-')[-1],

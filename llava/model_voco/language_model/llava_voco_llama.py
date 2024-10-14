@@ -249,7 +249,7 @@ class VoCoLlamaModel(LlamaPreTrainedModel):
             # output_attentions=True can not be supported when using SDPA, and we fall back on
             # the manual implementation that requires a 4D causal mask in all cases.
             _2d_attention_mask_b = attention_mask
-
+            print('step')
             attention_mask = _prepare_4d_causal_attention_mask_for_sdpa(
                 attention_mask,
                 (batch_size, seq_length),
@@ -402,7 +402,6 @@ class VoCoLlamaForCausalLM(LlamaPreTrainedModel, VoCoMetaForCausalLM):
             return_dict: Optional[bool] = None,
             voco_loc_back=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-
         if inputs_embeds is None:
             (
                 input_ids,
@@ -528,7 +527,6 @@ class VoCoLlamaForCausalLM(LlamaPreTrainedModel, VoCoMetaForCausalLM):
         inputs = self.prepare_inputs_for_generation_llama(
             input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs
         )
-
         if voco_loc_back is not None:
             inputs['voco_loc_back'] = voco_loc_back
         if images is not None:
@@ -578,7 +576,7 @@ class VoCoLlamaForCausalLM(LlamaPreTrainedModel, VoCoMetaForCausalLM):
                 position_ids = position_ids[:, -input_ids.shape[1]:]
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
+        if inputs_embeds is not None and (past_key_values is None or cache_length == 0):
             model_inputs = {"inputs_embeds": inputs_embeds}
         else:
             model_inputs = {"input_ids": input_ids}
