@@ -1,9 +1,11 @@
+import logging
 import os
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Sequence, Callable, Union
+from typing import Optional, Dict, Sequence, Callable, Union, Any
 import warnings
 
 import torch
+from torch import nn
 from torch.utils.data import DataLoader, Dataset
 import transformers
 from transformers import AutoTokenizer
@@ -19,7 +21,6 @@ from llava import data as custom_data
 from llava.data.utils import ParallelLoaderWrapper
 from llava.utils import rank0_print
 
-local_rank = None
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -53,11 +54,14 @@ class DataArguments:
     num_frames: int = None
     frame_size: int = 336
     hwaccel: Optional[str] = field(default=None)
+    dataset_debug: bool = field(default=False)
+    video_backend: str = field(default="pyav")
 
 
 @dataclass
 class TrainingArguments(TrainingArguments):
     cache_dir: Optional[str] = field(default=None)
+    ckpt_root: Optional[str] = field(default=None)
     optim: str = field(default="adamw_torch")
     remove_unused_columns: bool = field(default=False)
     freeze_mm_mlp_adapter: bool = field(default=False)
@@ -99,26 +103,28 @@ def get_dataset(data_args: DataArguments, image_processor: Callable, text_proces
             frame_shape=(data_args.frame_size, data_args.frame_size),
             transform=image_processor,
             text_preprocess=text_processor,
+            debug=data_args.dataset_debug,
+            video_backend=data_args.video_backend,
         )
 
 
-def process_text(input_dict: dict, tokenizer, conv: Conversation, num_voco: int, gen_prompt=False):
+def process_text(input_dict: dict, tokenizer, conv: Conversation, num_voco: int, generation=False):
     conv = conv.copy()
     match input_dict:
         case {'caption': caption}:
-            if gen_prompt:
+            if generation:
                 conv.append_message(conv.roles[1], '')
             else:
                 conv.append_message(conv.roles[1], caption)
         case {'q': q, 'a': a}:
             conv.append_message(conv.roles[0], q)
-            if gen_prompt:
+            if generation:
                 conv.append_message(conv.roles[1], '')
             else:
                 conv.append_message(conv.roles[1], a)
         case {'q': q}:
             conv.append_message(conv.roles[0], q)
-            if gen_prompt:
+            if generation:
                 conv.append_message(conv.roles[1], '')
         case _:
             raise ValueError("Invalid input_dict keys")
@@ -126,7 +132,7 @@ def process_text(input_dict: dict, tokenizer, conv: Conversation, num_voco: int,
     prompt = f"<image>\n{'<voco>' * num_voco}\n{conv.get_prompt()}"
     input_ids = tokenizer_image_token(prompt, tokenizer, return_tensors='pt')
     output = {'input_ids': input_ids, 'labels': None}
-    if not gen_prompt:
+    if not generation:
         targets = torch.full_like(input_ids, IGNORE_INDEX)
         if 'caption' in input_dict:
             cap_len = len(tokenizer(input_dict['caption'], return_attention_mask=False)['input_ids'])
@@ -177,9 +183,19 @@ class LLaVATrainerWrapper(LLaVATrainer):
     def get_test_dataloader(self, test_dataset: Dataset) -> DataLoader:
         return ParallelLoaderWrapper(super().get_test_dataloader(test_dataset))
 
+    def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+        # Debug purpose only
+        if 7 < self.state.global_step < 914:
+            logging.info(f'rank: {self.args.local_rank} | step: {self.state.global_step} | skipped')
+            return torch.tensor(torch.nan)
+        else:
+            logging.info(f'rank: {self.args.local_rank} | step: {self.state.global_step} | step start')
+            out = super().training_step(model, inputs)
+            logging.info(f'rank: {self.args.local_rank} | step: {self.state.global_step} | step end')
+            return out
+
 
 def main():
-    global local_rank
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
@@ -242,11 +258,10 @@ def main():
     rank0_print(f"Model saved to {training_args.output_dir}")
 
 
-
 if __name__ == "__main__":
     # if distributed training, disable logging from subprocesses globally
-    if int(os.environ.get("LOCAL_RANK", 0)) != 0:
-        import logging
+    # if int(os.environ.get("LOCAL_RANK", 0)) != 0:
+    #     import logging
 
-        logging.disable(logging.ERROR)
+    # logging.disable(logging.ERROR)
     main()

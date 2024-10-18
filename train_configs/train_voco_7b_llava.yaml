@@ -12,9 +12,9 @@ base_command:
   - llava/train/train_voco.py
 
 training_params:
-  run_name: voco-7b-finetune-4token-freezemlp-lr1e-5-wd1e-2
-  output_dir: ./checkpoints/voco-7b-finetune-4token-freezemlp-lr1e-5-wd1e-2
-  num_voco: 4
+  run_name: voco-7b-finetune-1token-freezemlp-lr5e-6
+  ckpt_root: checkpoints
+  num_voco: 1
   attn_implementation: sdpa
   model_name_or_path: lmsys/vicuna-7b-v1.5
   version: v1
@@ -39,9 +39,10 @@ training_params:
 #  save_steps: 50000
   save_strategy: "epoch"
   save_total_limit: 10
-  learning_rate: 1e-5
-#  weight_decay: 0.0 # default
-  weight_decay: 1e-2
+#  learning_rate: 2e-5
+  learning_rate: 5e-6
+  weight_decay: 0.0 # default
+#  weight_decay: 1e-2
   warmup_ratio: 0.03
   lr_scheduler_type: "cosine"
   logging_steps: 1

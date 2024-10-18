@@ -106,7 +106,8 @@ class Conversation:
                     chat_template_messages.append({"role": role, "content": message})
 
             # print(chat_template_messages)
-            return self.tokenizer.apply_chat_template(chat_template_messages, tokenize=False, add_generation_prompt=True)
+            return self.tokenizer.apply_chat_template(chat_template_messages, tokenize=False,
+                                                      add_generation_prompt=True)
             # ret = "" if self.system == "" else self.system + self.sep + "\n"
             # for role, message in messages:
             #     if message:
@@ -228,7 +229,7 @@ class Conversation:
 
     def get_images(self, return_pil=False, return_path=False):
         images = []
-        for i, (role, msg) in enumerate(self.messages[self.offset :]):
+        for i, (role, msg) in enumerate(self.messages[self.offset:]):
             if i % 2 == 0:
                 if type(msg) is tuple:
                     msg, image, image_process_mode = msg
@@ -251,7 +252,7 @@ class Conversation:
 
     def to_gradio_chatbot(self):
         ret = []
-        for i, (role, msg) in enumerate(self.messages[self.offset :]):
+        for i, (role, msg) in enumerate(self.messages[self.offset:]):
             if i % 2 == 0:
                 if type(msg) is tuple:
                     msg, image, image_process_mode = msg
@@ -288,7 +289,9 @@ class Conversation:
         return ret
 
     def copy(self):
-        return Conversation(system=self.system, roles=self.roles, messages=[[x, y] for x, y in self.messages], offset=self.offset, sep_style=self.sep_style, sep=self.sep, sep2=self.sep2, version=self.version)
+        return Conversation(system=self.system, roles=self.roles, messages=[[x, y] for x, y in self.messages],
+                            offset=self.offset, sep_style=self.sep_style, sep=self.sep, sep2=self.sep2,
+                            version=self.version)
 
     def dict(self):
         if len(self.get_images()) > 0:
@@ -425,11 +428,13 @@ conv_llava_llama_2 = Conversation(
     sep2="</s>",
 )
 
+
 def safe_load_tokenizer(tokenizer_id):
     try:
         return AutoTokenizer.from_pretrained(tokenizer_id)
     except Exception:
         return None
+
 
 conv_llava_llama_3 = Conversation(
     system="You are a helpful language and vision assistant. " "You are able to understand the visual content that the user provides, " "and assist the user with a variety of tasks using natural language.",
@@ -499,7 +504,9 @@ You are a helpful assistant.""",
     sep="<|im_end|>",
 )
 
-conv_gemma_instruct = Conversation(system="", roles=("<start_of_turn>user\n", "<start_of_turn>model\n"), version="gemma", messages=[], offset=0, sep_style=SeparatorStyle.GEMMA, sep="<end_of_turn>\n")
+conv_gemma_instruct = Conversation(system="", roles=("<start_of_turn>user\n", "<start_of_turn>model\n"),
+                                   version="gemma", messages=[], offset=0, sep_style=SeparatorStyle.GEMMA,
+                                   sep="<end_of_turn>\n")
 
 conv_llava_plain = Conversation(
     system="",
@@ -521,8 +528,8 @@ conv_llava_v0 = Conversation(
 
 conv_llava_v0_mmtag = Conversation(
     system="A chat between a curious user and an artificial intelligence assistant. "
-    "The assistant is able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language."
-    "The visual content will be provided with the following format: <Image>visual content</Image>.",
+           "The assistant is able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language."
+           "The visual content will be provided with the following format: <Image>visual content</Image>.",
     roles=("Human", "Assistant"),
     messages=[],
     offset=0,
@@ -544,8 +551,8 @@ conv_llava_v1 = Conversation(
 
 conv_llava_v1_mmtag = Conversation(
     system="A chat between a curious user and an artificial intelligence assistant. "
-    "The assistant is able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language."
-    "The visual content will be provided with the following format: <Image>visual content</Image>.",
+           "The assistant is able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language."
+           "The visual content will be provided with the following format: <Image>visual content</Image>.",
     roles=("USER", "ASSISTANT"),
     messages=[],
     offset=0,
@@ -599,12 +606,25 @@ Answer the questions.""",
     sep="<|im_end|>",
 )
 
+custom_vicuna_video_inst = Conversation(
+    system="You are a video language assistant. " "Precisely analyze sequences of consecutive frames and follow the user\'s instruction.",
+    roles=("USER", "ASSISTANT"),
+    version="v1",
+    messages=[],
+    offset=0,
+    sep_style=SeparatorStyle.TWO,
+    sep=" ",
+    sep2="</s>",
+)
+
 custom_vicuna_video_caption = Conversation(
     system="You are a video language assistant. " "Precisely analyze sequences of consecutive frames and follow the user\'s instruction.",
     roles=("USER", "ASSISTANT"),
     version="v1",
     messages=[
-        ("USER", "Describe the main visual content or key elements you observe in the video clip in a single sentence."),
+        (
+            "USER",
+            "Describe the main visual content or key elements you observe in the video clip in a single sentence."),
     ],
     offset=0,
     sep_style=SeparatorStyle.TWO,
@@ -650,10 +670,10 @@ conv_templates = {
     "qwen_1_5": conv_qwen,
     "qwen_2": conv_qwen,
     "gemma_instruct": conv_gemma_instruct,
+    "vicuna_video_inst": custom_vicuna_video_inst,
     "vicuna_video_caption": custom_vicuna_video_caption,
     "vicuna_video_qa": custom_vicuna_video_qa,
 }
-
 
 if __name__ == "__main__":
     print(default_conversation.get_prompt())

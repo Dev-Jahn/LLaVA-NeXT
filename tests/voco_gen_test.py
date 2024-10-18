@@ -63,7 +63,7 @@ from llava.train.train_voco_video import process_text
 
 conv = conversation.conv_vicuna_v1
 image_processor = lambda images: process_images(images, model.get_vision_tower().image_processor, model.config)
-text_processor = lambda d: process_text(d, tokenizer, conv, model.config.num_voco_tokens, gen_prompt=True)
+text_processor = lambda d: process_text(d, tokenizer, conv, model.config.num_voco_tokens, generation=True)
 
 # dataset.labels[0]['q'] = 'What is described in this video?'
 

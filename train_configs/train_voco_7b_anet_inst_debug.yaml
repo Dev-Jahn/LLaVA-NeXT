@@ -1,5 +1,5 @@
 #cuda_devices: "0,1,2,3" # batch size 16
-cuda_devices: "4,5,6,7"
+cuda_devices: "1,2,3,4,5,6,7"
 #cuda_devices: "0,1,2,3,4,5,6,7" # batch size 8
 wandb_project: "video"
 
@@ -9,36 +9,38 @@ base_command:
   - --config_file
   - train_configs/accelerate.yaml
   - --num_processes
-  - "4"
+  - "7"
   - llava/train/train_voco_video.py
 
 training_params:
-  run_name: "voco-7b-video-4token-anet_caption-lr1e5"
+  run_name: "voco-7b-video-2token-anet_inst-0807-lr1e5"
+#  run_name: "voco-7b-video-2token-anet_inst-frzmlp-lr1e5"
   ckpt_root: checkpoints
-  #  model_path: voco_llama_ckpt_0807
-  model_path: voco-7b-finetune-4token
-  num_voco: 4
+  model_path: voco_llama_ckpt_0807
+#  model_path: voco_llama_ckpt_freeze_mlp
+#  model_path: voco-7b-finetune-4token
+  num_voco: 2
   attn_implementation: sdpa
 #  max_steps: 3 #testing
   num_train_epochs: 1
+  dataset: activitynet-instruct
   data_dir: /data/datasets/ActivityNet
-  conv_name: vicuna_video_caption
+  conv_name: vicuna_video_inst
   version: v0
-  dataset: activitynet-captions
   num_frames: 32
   frame_size: 336
   freeze_mm_mlp_adapter: true
   model_max_length: 2048
-  per_device_train_batch_size: 16
-  per_device_eval_batch_size: 4
-  gradient_accumulation_steps: 2
-  dataloader_num_workers: 16
+  per_device_train_batch_size: 1
+  dataloader_num_workers: 10
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 1
   dataloader_prefetch_factor: 1
   bf16: true
   evaluation_strategy: "no"
 #  resume_from_checkpoint: "checkpoint-22"
   save_strategy: "steps"
-  save_steps: 50
+  save_steps: 0.1
 #  save_strategy: "epoch"
   save_total_limit: 10
   learning_rate: 1e-5
@@ -49,6 +51,8 @@ training_params:
   gradient_checkpointing: true
 #  dataloader_persistent_workers: false
   report_to: wandb
+  video_backend: decord
+  dataset_debug: true
 
 optional_params:
 #  tf32: true

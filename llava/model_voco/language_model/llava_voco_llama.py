@@ -249,13 +249,13 @@ class VoCoLlamaModel(LlamaPreTrainedModel):
             # output_attentions=True can not be supported when using SDPA, and we fall back on
             # the manual implementation that requires a 4D causal mask in all cases.
             _2d_attention_mask_b = attention_mask
-            print('step')
             attention_mask = _prepare_4d_causal_attention_mask_for_sdpa(
                 attention_mask,
                 (batch_size, seq_length),
                 inputs_embeds,
                 past_key_values_length,
             )
+            torch.save(attention_mask, 'attention_mask.pt')
 
             mask_type = attention_mask.dtype
             mask_min = torch.finfo(mask_type).min
@@ -277,6 +277,7 @@ class VoCoLlamaModel(LlamaPreTrainedModel):
 
             for b in range(attention_mask.size(0)):
                 attention_mask[b, 0, :first_false_indices[b], :] = 0
+            torch.save(attention_mask, 'attention_mask_voco.pt')
 
         else:
             # 4d mask is passed through the layers

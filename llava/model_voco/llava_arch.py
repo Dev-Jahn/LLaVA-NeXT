@@ -446,7 +446,7 @@ class VoCoMetaForVideo(VoCoMetaForCausalLM):
 
     def encode_video(self, input_ids_single, video_frames: torch.Tensor):
         # input_ids_single.shape: (seq_len,), contains <image>, <voco> tokens and prompts
-        # videos.shape: (num_frames, C, H, W)
+        # video_frames.shape: (num_frames, C, H, W). Consider frames as batch
         with torch.inference_mode():
             # encode video frames as batch
             features = self.get_model().get_vision_tower()(video_frames)  # Shape : (num_frames, 576, 1024)
@@ -459,7 +459,8 @@ class VoCoMetaForVideo(VoCoMetaForCausalLM):
             attention_mask = torch.ones(weaved.shape[:2], dtype=torch.bool, device=weaved.device)
             # Forward through the model
             out = self.get_model().forward(inputs_embeds=weaved,
-                                           attention_mask=attention_mask)
+                                           attention_mask=attention_mask,
+                                           use_cache=False)
             # out.last_hidden_state Shape : (num_frames, 576+num_voco+extra, 4096)
         return out.last_hidden_state[:, -self.config.num_voco_tokens:, :]  # Shape : (num_frames, num_voco, 4096)
 

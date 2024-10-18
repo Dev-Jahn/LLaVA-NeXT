@@ -2,6 +2,7 @@ from PIL import Image
 import numpy as np
 import torch
 import wandb
+from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
 
 
 def replace_image_index(input_ids, tokenizer):
@@ -27,3 +28,8 @@ def video2wandb(table: wandb.Table, video_tensor, processor, **kwargs):
     kwargs.update({'video': denormalize_video(video_tensor, mean, std)})
     table.add_data([kwargs.get(col) for col in table.columns])
     return table
+
+
+class VideoEvalCallback(TrainerCallback):
+    def on_evaluate(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        ...

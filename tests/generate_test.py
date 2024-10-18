@@ -37,7 +37,7 @@ data_args = DataArguments(dataset='activitynet-qa', data_dir='/data/datasets/Act
 
 conv = conversation.custom_vicuna_video_qa
 image_processor = lambda images: process_images(images, model.get_vision_tower().image_processor, model.config)
-text_processor = lambda d: process_text(d, tokenizer, conv, model.config.num_voco_tokens, gen_prompt=True)
+text_processor = lambda d: process_text(d, tokenizer, conv, model.config.num_voco_tokens, generation=True)
 
 dataset = get_dataset(data_args, image_processor, text_processor)
 

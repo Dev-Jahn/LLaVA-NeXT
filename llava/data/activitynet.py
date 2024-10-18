@@ -9,27 +9,43 @@ from .video import LocalVideoDataset
 
 class ActivityNet(LocalVideoDataset):
     def __init__(
-            self,
-            root_dir: str,
-            split: str,
-            labeltype: Literal['none', 'captions', 'qa', 'instruct'],
-            exts: List[str] = ('.mp4', '.mkv', '.webm'),
-            n_frames: int = 32,
-            fps: int = None,
-            frame_shape: Tuple[int] = (336, 336),
-            transform: Optional[Callable] = lambda x: x,
-            text_preprocess: Optional[Callable] = lambda x: x,
+        self,
+        root_dir: str,
+        split: str,
+        labeltype: Literal['none', 'captions', 'qa', 'instruct'],
+        exts: List[str] = ('.mp4', '.mkv', '.webm'),
+        n_frames: int = 32,
+        fps: int = None,
+        frame_shape: Tuple[int] = (None, None),
+        transform: Optional[Callable] = lambda x: x,
+        text_preprocess: Optional[Callable] = lambda x: x,
+        no_video: bool = False,
+        **kwargs,
     ):
+        assert split in ['train', 'val', 'test']
+        assert labeltype in ['none', 'captions', 'qa', 'instruct']
         root_dir = os.path.expanduser(root_dir)
-        video_dir = os.path.join(root_dir, 'videos', 'trainval' if split in ['train', 'val'] else 'test')
-        super().__init__(video_dir, exts, n_frames=n_frames, fps=fps, frame_shape=frame_shape, transform=transform)
+        match split:
+            case 'train' | 'val':
+                video_dir = os.path.join(root_dir, 'videos', 'trainval')
+            case 'test':
+                video_dir = os.path.join(root_dir, 'videos', 'test')
+            case _:
+                raise ValueError(f"Invalid split {split}")
+        super().__init__(video_dir, exts,
+                         n_frames=n_frames, fps=fps, frame_shape=frame_shape, transform=transform, **kwargs)
         self.root_dir = root_dir
         self.split = split
         self.id_path_map = {os.path.splitext(os.path.split(path)[-1])[0]: path for path in self.video_paths}
+        self.path_id_map = {v: k for k, v in self.id_path_map.items()}
         self.labeltype = labeltype
         self.labels = self._load_labels()
-        self.video_used = list((set([label['video_id'] for label in self.labels])))
+        if self.labeltype != 'none':
+            self.video_used = list((set([label['video_id'] for label in self.labels])))
+        else:
+            self.video_used = list(self.id_path_map.keys())
         self.text_preprocess = text_preprocess
+        self.no_video = no_video
 
     def _load_labels(self) -> list:
         labels = []
@@ -55,7 +71,7 @@ class ActivityNet(LocalVideoDataset):
                 labels.append({
                     'video_id': 'v_' + q['video_name'],
                     'q': q['question'].capitalize().strip() + '?',
-                    'a': answers[q['question_id']]['answer'].capitalize().strip() + '.',
+                    'a': answers[q['question_id']]['answer'].capitalize().strip(),
                 })
         elif self.labeltype == 'instruct':
             with open(os.path.join(self.root_dir, 'VideoInstruct100K.json'), 'r') as f:
@@ -75,20 +91,18 @@ class ActivityNet(LocalVideoDataset):
             return len(self.labels)
 
     def __getitem__(self, idx: int):
+        return_dict = {}
         if self.labeltype == 'none':
-            frames = self._load_video(self.video_paths[idx])
-            return {'video_id': self.id_path_map[idx], 'video': frames}
+            path = self.video_paths[idx]
+            return_dict.update({'video_id': self.path_id_map[path]})
         else:
-            label = self.labels[idx]
-            start, end = label.get('timestamp', (None, None))
-            frames = self._load_video(
-                self.id_path_map[label['video_id']],
-                start=start, end=end
-            )
-            return dict({
-                'video': self.transform(frames),
-                **self.text_preprocess(label),
-            })
+            path = self.id_path_map[self.labels[idx]['video_id']]
+            return_dict.update(self.text_preprocess(self.labels[idx]))
+        if not self.no_video:
+            start, end = self.labels[idx].get('timestamp', (None, None)) if self.labeltype != 'none' else (None, None)
+            return_dict.update(
+                {'video': self.transform(self._load_video(path, start=start, end=end))})
+        return return_dict
 
     def __repr__(self):
         return f"""ActivityNet {self.labeltype.capitalize()} Dataset

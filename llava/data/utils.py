@@ -1,9 +1,11 @@
+import json
 import os
 import logging
 import subprocess
 
 import yt_dlp
 from PIL import Image
+import cv2
 import ffmpeg
 from torch.utils.data import DataLoader, BatchSampler
 from accelerate.data_loader import DataLoaderShard, BatchSamplerShard
@@ -73,12 +75,58 @@ def get_dummy_logger(name='dummy'):
 
 def get_video_info(path):
     probe = ffmpeg.probe(path)
-    return next(s for s in probe['streams'] if s['codec_type'] == 'video')
+    vstream = next(s for s in probe['streams'] if s['codec_type'] == 'video')
+    astream = next(s for s in probe['streams'] if s['codec_type'] == 'audio')
+    format_ = probe['format']
+    return vstream, astream, format_
+
+
+def get_video_packet_count(path):
+    cmd = [
+        'ffprobe',
+        '-v', 'quiet',
+        '-select_streams', 'v:0',
+        '-count_packets',
+        '-show_entries', 'stream=nb_read_packets',
+        '-of', 'csv=p=0',
+        path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Error running ffprobe: {result.stderr}")
+    return json.loads(result.stdout)
+
+
+def get_video_frame_count_slow(path):
+    cmd = [
+        'ffprobe',
+        '-v', 'quiet',
+        '-select_streams', 'v:0',
+        '-count_frames',
+        '-show_entries', 'stream=nb_read_frames',
+        '-of', 'csv=p=0',
+        path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Error running ffprobe: {result.stderr}")
+    return json.loads(result.stdout)
+
+
+def get_video_frame_count(path):
+    cap = cv2.VideoCapture(path)
+    cnt_cv2 = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    # Some VP9-MKV, cv2: 4563, ffmpeg: 4562, packets: 4734, have no fucking idea
+    if cnt_cv2 == get_video_packet_count(path):
+        return cnt_cv2
+    else:
+        return get_video_frame_count_slow(path)
 
 
 def yt2pil(
-        video_url, resolution, fps=None, max_frames=None, start=None, end=None,
-        cookie_path=None, hwaccel=None, debug=False
+    video_url, resolution, fps=None, max_frames=None, start=None, end=None,
+    cookie_path=None, hwaccel=None, debug=False
 ):
     if cookie_path:
         cookie_path = os.path.abspath(os.path.expanduser(cookie_path))
@@ -213,8 +261,9 @@ class suppress_system:
             return None
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        os.dup2(self.save_fds[0], 1)
-        os.dup2(self.save_fds[1], 2)
+        if self.enabled:
+            os.dup2(self.save_fds[0], 1)
+            os.dup2(self.save_fds[1], 2)
 
-        for fd in self.null_fds + self.save_fds:
-            os.close(fd)
+            for fd in self.null_fds + self.save_fds:
+                os.close(fd)

@@ -3,12 +3,12 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.utils.checkpoint
 from torch import nn
-from transformers import Mamba2PreTrainedModel
+from transformers import Mamba2PreTrainedModel, Mamba2Config, ProcessorMixin
 from transformers.models.mamba2.modeling_mamba2 import Mamba2Block, Mamba2RMSNorm, Mamba2Cache, Mamba2Output
 
 
 class Mamba2Encoder(Mamba2PreTrainedModel):
-    def __init__(self, config):
+    def __init__(self, config: Mamba2Config):
         super().__init__(config)
 
         self.layers = nn.ModuleList([Mamba2Block(config, layer_idx=idx) for idx in range(config.num_hidden_layers)])
@@ -19,15 +19,15 @@ class Mamba2Encoder(Mamba2PreTrainedModel):
         self.post_init()
 
     def forward(
-            self,
-            inputs_embeds: Optional[torch.LongTensor] = None,
-            cache_params: Optional[Mamba2Cache] = None,
-            use_cache: Optional[bool] = None,
-            output_hidden_states: Optional[bool] = None,
-            return_dict: Optional[bool] = None,
-            cache_position: Optional[torch.LongTensor] = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            **kwargs,
+        self,
+        inputs_embeds: Optional[torch.LongTensor] = None,
+        cache_params: Optional[Mamba2Cache] = None,
+        use_cache: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> Union[Tuple, Mamba2Output]:
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -95,21 +95,40 @@ class Mamba2Encoder(Mamba2PreTrainedModel):
         )
 
 
+class Mamba2VideoCompConfig(Mamba2Config):
+    def __init__(self, vision_encoder_name, **kwargs):
+        super().__init__(**kwargs)
+        self.vision_encoder_name = vision_encoder_name
+
+
+class Mamba2VideoCompOutput(Mamba2Output):
+    loss: Optional[torch.FloatTensor] = None
+
+
+class MambaVideoProcessor(ProcessorMixin):
+    def __init__(self, ):
+        self.frame_tokenizer = ...
+        self.image_processor = ...
+
+
 class Mamba2ForVideoCompression(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config: Mamba2VideoCompConfig):
         super().__init__()
-        self.vison_encoder =
-        for param in self.clip_encoder.parameters():
+        self.config = config
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.padding_idx)
+        self.video_processor = MambaVideoProcessor()
+        self.vison_encoder = ...
+        for param in self.vison_encoder.parameters():
             param.requires_grad = False
 
-        self.spatial_mamba = Mamba2ForCompression(config)
-        self.temporal_mamba = Mamba2ForCompression(config)
+        self.spatial_mamba = Mamba2Encoder(config)
+        self.temporal_mamba = Mamba2Encoder(config)
 
-    def forward(self, frames):
+    def forward(self, frames: torch.Tensor) -> Union[Tuple, Mamba2VideoCompOutput]:
         batch_size, num_frames, c, h, w = frames.shape
 
         # Encode frames with CLIP
-        encoded_frames = self.clip_encoder(frames.view(-1, c, h, w))
+        encoded_frames = self.vison_encoder(frames.view(-1, c, h, w))
         encoded_frames = encoded_frames.view(batch_size, num_frames, -1, encoded_frames.shape[-1])
 
         # Step 2: Spatial Mamba
@@ -120,7 +139,7 @@ class Mamba2ForVideoCompression(nn.Module):
         spatial_hidden = torch.stack(spatial_hidden, dim=1)
 
         # Step 3: Temporal Mamba on spatial hidden states
-        temporal_output_3 = self.temporal_mamba(inputs_embeds=spatial_hidden).last_hidden_state[:, -1, :]
+        temporal_spatial_output = self.temporal_mamba(inputs_embeds=spatial_hidden).last_hidden_state[:, -1, :]
 
         # Step 4: Temporal Mamba on encoded frames
         temporal_hidden = []
@@ -130,6 +149,5 @@ class Mamba2ForVideoCompression(nn.Module):
         temporal_hidden = torch.stack(temporal_hidden, dim=1)
 
         # Step 5: Spatial Mamba on temporal hidden states
-        spatial_output_5 = self.spatial_mamba(inputs_embeds=temporal_hidden).last_hidden_state[:, -1, :]
-
-        return temporal_output_3, spatial_output_5
+        spatial_temporal_output = self.spatial_mamba(inputs_embeds=temporal_hidden).last_hidden_state[:, -1, :]
+        return temporal_spatial_output, spatial_temporal_output
