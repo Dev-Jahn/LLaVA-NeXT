@@ -12,6 +12,19 @@ from accelerate.data_loader import DataLoaderShard, BatchSamplerShard
 
 
 class ParallelLoaderWrapper:
+    """
+    Change the default behavior of pytorch DataLoader
+    Pytorch:
+        Each worker prefetches entire batch.
+        num_worker batches are queued when 1 batch is ready.
+        Prefetches num_worker * batch_size * prefetch_factor samples.
+    This:
+        Each worker prefetches single sample.
+        Collate after 1 batch is ready.
+        Prefetches only batchsize * prefetch_factor samples.
+    NOTE: Wrap the DataLoader after prepare if using Accelerate
+    """
+
     def __init__(self, loader_like):
         # Accelerate compatibility
         if isinstance(loader_like, DataLoaderShard):

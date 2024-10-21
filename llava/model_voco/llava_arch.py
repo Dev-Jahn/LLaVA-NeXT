@@ -457,10 +457,12 @@ class VoCoMetaForVideo(VoCoMetaForCausalLM):
             # slice the input_ids into segments and weave them with features
             weaved, _, _ = self.weave(trunc, features, broadcast=True)
             attention_mask = torch.ones(weaved.shape[:2], dtype=torch.bool, device=weaved.device)
+            # Creat voco_loc_back for attention mask generation
+            voco_loc_back = torch.arange(self.config.num_voco_tokens).flip(0).tile(weaved.shape[0], 1)
             # Forward through the model
             out = self.get_model().forward(inputs_embeds=weaved,
                                            attention_mask=attention_mask,
-                                           use_cache=False)
+                                           voco_loc_back=voco_loc_back)
             # out.last_hidden_state Shape : (num_frames, 576+num_voco+extra, 4096)
         return out.last_hidden_state[:, -self.config.num_voco_tokens:, :]  # Shape : (num_frames, num_voco, 4096)
 

@@ -30,9 +30,10 @@ def build_command(config):
 def main():
     args = parser.parse_args()
     config = load_config(args.config)
-    ckpt_root = config['training_params']['ckpt_root']
+    ckpt_root = config['training_params'].pop('ckpt_root')
     config['training_params']['output_dir'] = os.path.join(ckpt_root, config['training_params']['run_name'])
-    config['training_params']['model_path'] = os.path.join(ckpt_root, config['training_params']['model_path'])
+    if 'model_path' in config['training_params']:
+        config['training_params']['model_path'] = os.path.join(ckpt_root, config['training_params']['model_path'])
     os.environ['CUDA_VISIBLE_DEVICES'] = config['cuda_devices']
     os.environ['WANDB_PROJECT'] = config['wandb_project']
     cmd = build_command(config)

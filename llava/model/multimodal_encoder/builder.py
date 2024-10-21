@@ -1,5 +1,4 @@
 import os
-from .clip_encoder import CLIPVisionTower
 from .imagebind import ImageBindWrapper
 from .open_clip_encoder import OpenCLIPVisionTower
 from .hf_vision import HFVisionTower
